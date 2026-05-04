@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+{% block title %}API Keys - AutoQA{% endblock %}
+
+{% block content %}
+<div class="sm:flex sm:items-center sm:justify-between mb-8">
+    <div>
+        <h1 class="text-2xl font-bold text-white flex items-center gap-2.5">
+            <i class="fa-solid fa-key text-accent-400"></i>
+            API Keys
+        </h1>
+        <p class="mt-1.5 text-sm text-gray-400">Manage API keys for agent authentication. Keys are used by MCP clients and agents to access the AutoQA REST API.</p>
+    </div>
+    <div class="mt-4 sm:mt-0">
+        <button onclick="document.getElementById('newKeyModal').classList.remove('hidden')"
+                class="btn-primary gap-2">
+            <i class="fa-solid fa-plus text-xs"></i>
+            New API Key
+        </button>
+    </div>
+</div>
+
+<!-- API Key Info Banner -->
+<div class="mb-6 alert-warning">
+    <div class="flex items-start gap-3">
+        <div class="flex-shrink-0 mt-0.5">
+            <i class="fa-solid fa-triangle-exclamation text-amber-400"></i>
+        </div>
+        <div>
+            <p class="text-sm text-amber-300/90">
+                <strong class="font-semibold">Important:</strong> API keys are shown only once at creation. If you lose a key, you must revoke it and create a new one.
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- API Keys Table -->
+<div class="card overflow-hidden">
+    <table class="table-dark">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Prefix</th>
+                <th>Created</th>
+                <th>Expires</th>
+                <th class="w-28">Status</th>
+                <th class="w-28 text-right">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for key in keys %}
+            <tr class="{% if key.revoked %}opacity-60{% endif %}">
+                <td class="font-medium text-white flex items-center gap-2">
+                    <i class="fa-solid fa-tag text-xs text-gray-600"></i>
+                    {{ key.name }}
+                </td>
+                <td class="text-gray-400 font-mono text-sm">{{ key.prefix }}*</td>
+                <td class="text-gray-400 flex items-center gap-1.5">
+                    <i class="fa-regular fa-calendar text-xs text-gray-600"></i>
+                    {{ key.created|date:"M d, Y H:i" }}
+                </td>
+                <td class="text-gray-400">
+                    {% if key.expiry_date %}{{ key.expiry_date|date:"M d, Y" }}{% else %}<span class="text-gray-600 italic">Never</span>{% endif %}
+                </td>
+                <td>
+                    {% if key.revoked %}
+                    <span class="badge badge-red">
+                        <i class="fa-solid fa-ban mr-1.5 text-[10px]"></i>
+                        Revoked
+                    </span>
+                    {% else %}
+                    <span class="badge badge-green">
+                        <i class="fa-solid fa-check mr-1.5 text-[10px]"></i>
+                        Active
+                    </span>
+                    {% endif %}
+                </td>
+                <td class="text-right">
+                    {% if not key.revoked %}
+                    <button onclick="revokeKey('{{ key.prefix }}', '{{ key.name }}')"
+                            class="text-gray-400 hover:text-red-400 transition-colors flex items-center justify-end gap-1.5 text-sm ml-auto">
+                        <i class="fa-solid fa-ban text-xs"></i>
+                        Revoke
+                    </button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" class="px-6 py-16 text-center">
+                    <div class="flex flex-col items-center">
+                        <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4">
+                            <i class="fa-solid fa-key text-2xl text-gray-500"></i>
+                        </div>
+                        <h3 class="text-sm font-semibold text-gray-300">No API keys yet</h3>
+                        <p class="mt-1.5 text-sm text-gray-500">Create your first API key to allow agents to authenticate.</p>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- New API Key Modal -->
+<div id="newKeyModal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <div class="px-6 py-4 border-b border-dark-500 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+                <i class="fa-solid fa-circle-plus text-accent-400"></i>
+                Create New API Key
+            </h3>
+            <button onclick="document.getElementById('newKeyModal').classList.add('hidden')" class="text-gray-500 hover:text-gray-300 transition-colors">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+        <div class="px-6 py-5 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-pen text-xs text-gray-500 mr-1"></i>Name <span class="text-red-400">*</span>
+                </label>
+                <input type="text" id="keyName" placeholder="e.g., Claude Code Agent, Qwen Tester"
+                       class="input-dark">
+                <p class="mt-1.5 text-xs text-gray-500">A descriptive name to identify this key.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-regular fa-calendar text-xs text-gray-500 mr-1"></i>Expiry Date <span class="text-gray-600">(optional)</span>
+                </label>
+                <input type="date" id="keyExpiry" class="input-dark">
+                <p class="mt-1.5 text-xs text-gray-500">Leave empty for no expiration.</p>
+            </div>
+        </div>
+        <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end space-x-3 border-t border-dark-500">
+            <button onclick="document.getElementById('newKeyModal').classList.add('hidden')" class="btn-ghost">
+                Cancel
+            </button>
+            <button onclick="createApiKey()" class="btn-primary">
+                <i class="fa-solid fa-check text-xs mr-1.5"></i>
+                Create Key
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- API Key Created Modal -->
+<div id="keyCreatedModal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <div class="px-6 py-4 border-b border-dark-500">
+            <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+                <i class="fa-solid fa-circle-check text-emerald-400"></i>
+                API Key Created
+            </h3>
+        </div>
+        <div class="px-6 py-5 space-y-4">
+            <div class="alert-warning">
+                <p class="text-sm text-amber-300/90 font-medium flex items-center gap-2">
+                    <i class="fa-solid fa-shield-halved text-xs"></i>
+                    Save this key now. It won't be shown again.
+                </p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-key text-xs text-gray-500 mr-1"></i>API Key
+                </label>
+                <div class="flex">
+                    <input type="text" id="newKeyValue" readonly
+                           class="flex-1 rounded-r-none border-dark-400 bg-dark-800 font-mono text-sm px-3 py-2.5 border text-gray-300">
+                    <button onclick="copyApiKey()"
+                            class="inline-flex items-center px-4 py-2.5 rounded-l-none rounded-r-lg border border-l-0 border-dark-400 bg-dark-600 hover:bg-dark-500 text-sm font-medium text-gray-300 transition-colors">
+                        <i class="fa-regular fa-copy text-xs mr-1.5"></i>
+                        Copy
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end border-t border-dark-500">
+            <button onclick="closeKeyCreatedModal()" class="btn-primary">
+                <i class="fa-solid fa-check text-xs mr-1.5"></i>
+                Done
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Revoke Confirmation Modal -->
+<div id="revokeModal" class="modal-overlay hidden">
+    <div class="modal-content max-w-md">
+        <div class="px-6 py-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-triangle-exclamation text-red-400"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Revoke API Key</h3>
+                    <p class="text-sm text-gray-400 mt-0.5">This action cannot be undone.</p>
+                </div>
+            </div>
+            <p class="text-sm text-gray-400">Are you sure you want to revoke "<span class="text-white font-medium" id="revokeKeyName"></span>"? Any agent using this key will lose access immediately.</p>
+        </div>
+        <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end space-x-3 border-t border-dark-500">
+            <button onclick="document.getElementById('revokeModal').classList.add('hidden')" class="btn-ghost">
+                Cancel
+            </button>
+            <button id="confirmRevokeBtn" class="btn-danger">
+                <i class="fa-solid fa-ban text-xs mr-1.5"></i>
+                Revoke
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function createApiKey() {
+    const name = document.getElementById('keyName').value.trim();
+    const expiry = document.getElementById('keyExpiry').value;
+
+    if (!name) {
+        alert('Key name is required.');
+        return;
+    }
+
+    const body = { name };
+    if (expiry) {
+        body.expiry_date = expiry;
+    }
+
+    try {
+        const res = await fetch('/api/api-keys/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            alert(data.error || 'Failed to create API key.');
+            return;
+        }
+
+        const data = await res.json();
+        document.getElementById('newKeyModal').classList.add('hidden');
+        document.getElementById('newKeyValue').value = data.key;
+        document.getElementById('keyCreatedModal').classList.remove('hidden');
+    } catch (err) {
+        alert('Network error. Please try again.');
+    }
+}
+
+function closeKeyCreatedModal() {
+    document.getElementById('keyCreatedModal').classList.add('hidden');
+    document.getElementById('keyName').value = '';
+    document.getElementById('keyExpiry').value = '';
+    location.reload();
+}
+
+function copyApiKey() {
+    const input = document.getElementById('newKeyValue');
+    navigator.clipboard.writeText(input.value).then(() => {
+        const btn = input.parentElement.querySelector('button');
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check text-xs mr-1.5"></i>Copied!';
+        setTimeout(() => btn.innerHTML = original, 2000);
+    });
+}
+
+function revokeKey(id, name) {
+    document.getElementById('revokeKeyName').textContent = name;
+    document.getElementById('revokeModal').classList.remove('hidden');
+    document.getElementById('confirmRevokeBtn').onclick = async function () {
+        try {
+            const res = await fetch('/api/api-keys/' + id + '/revoke/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (res.ok) {
+                location.reload();
+            } else {
+                alert('Failed to revoke key.');
+            }
+        } catch (err) {
+            alert('Network error. Please try again.');
+        }
+    };
+}
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (const cookie of cookies) {
+            const [cookieName, cookieVal] = cookie.trim().split('=');
+            if (cookieName === name) {
+                cookieValue = decodeURIComponent(cookieVal);
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+</script>
+{% endblock %}

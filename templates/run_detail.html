@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% load display_filters %}
+{% block title %}Run #{{ run.id }} - {{ run.plan.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <a href="{% url 'plan_detail' run.plan.id %}" class="text-sm text-gray-400 hover:text-accent-400 mb-3 inline-flex items-center gap-1.5 transition-colors">
+        <i class="fa-solid fa-arrow-left text-xs"></i>
+        Back to Plan
+    </a>
+    <div class="sm:flex sm:items-center sm:justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-white flex items-center gap-2.5">
+                <i class="fa-solid fa-play text-accent-400"></i>
+                Run #{{ run.id }}
+            </h1>
+            <p class="mt-1.5 text-sm text-gray-400 flex items-center gap-2">
+                <span>{{ run.plan.name }}</span>
+                <span class="text-gray-600">·</span>
+                <span class="flex items-center gap-1.5">
+                    <i class="fa-regular fa-clock text-xs"></i>
+                    Started {{ run.started_at|date:"M d, Y H:i" }}
+                </span>
+            </p>
+        </div>
+        <div class="mt-4 sm:mt-0">
+            <span class="badge text-sm px-3 py-1
+                {% if run.status == 'completed' %}badge-green
+                {% elif run.status == 'failed' %}badge-red
+                {% elif run.status == 'running' %}badge-yellow
+                {% else %}badge-gray{% endif %}">
+                <i class="fa-solid
+                    {% if run.status == 'completed' %}fa-circle-check
+                    {% elif run.status == 'failed' %}fa-circle-xmark
+                    {% elif run.status == 'running' %}fa-spinner fa-spin
+                    {% else %}fa-circle{% endif %} mr-2"></i>
+                {{ run.get_status_display }}
+            </span>
+        </div>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        <div class="card">
+            <div class="px-5 py-4">
+                <dt class="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-layer-group text-[10px]"></i>
+                    Total Steps
+                </dt>
+                <dd class="mt-2 text-2xl font-bold text-white">{{ run.total_steps }}</dd>
+            </div>
+        </div>
+        <div class="card">
+            <div class="px-5 py-4">
+                <dt class="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-check text-[10px]"></i>
+                    Passed
+                </dt>
+                <dd class="mt-2 text-2xl font-bold text-emerald-400">{{ run.passed_steps }}</dd>
+            </div>
+        </div>
+        <div class="card">
+            <div class="px-5 py-4">
+                <dt class="text-xs font-semibold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-xmark text-[10px]"></i>
+                    Failed
+                </dt>
+                <dd class="mt-2 text-2xl font-bold text-red-400">{{ run.failed_steps }}</dd>
+            </div>
+        </div>
+        <div class="card">
+            <div class="px-5 py-4">
+                <dt class="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-forward text-[10px]"></i>
+                    Skipped
+                </dt>
+                <dd class="mt-2 text-2xl font-bold text-gray-400">{{ run.skipped_steps }}</dd>
+            </div>
+        </div>
+        <div class="card">
+            <div class="px-5 py-4">
+                <dt class="text-xs font-semibold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-bug text-[10px]"></i>
+                    Incidents
+                </dt>
+                <dd class="mt-2 text-2xl font-bold text-red-400">{{ incidents|length }}</dd>
+            </div>
+        </div>
+        <div class="card">
+            <div class="px-5 py-4">
+                <dt class="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
+                    Findings
+                </dt>
+                <dd class="mt-2 text-2xl font-bold text-amber-400">{{ findings|length }}</dd>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Main Tabs: Step Results, Incidents, Findings -->
+<div class="card overflow-hidden">
+    <!-- Tab Headers -->
+    <div class="border-b border-dark-500">
+        <div class="flex">
+            <button onclick="switchTab('steps')" id="tab-steps"
+                class="tab-btn px-5 py-3.5 text-sm font-medium border-b-2 transition-colors
+                {% if active_tab == 'steps' %}
+                    border-accent-400 text-accent-400
+                {% elif not active_tab %}
+                    border-accent-400 text-accent-400
+                {% else %}
+                    border-transparent text-gray-400 hover:text-gray-200 hover:border-dark-400
+                {% endif %}">
+                <i class="fa-solid fa-list-ul text-xs mr-1.5"></i>
+                Step Results
+                {% if results %}
+                <span class="ml-2 text-xs bg-dark-500 text-gray-300 px-1.5 py-0.5 rounded-full">{{ results|length }}</span>
+                {% endif %}
+            </button>
+            <button onclick="switchTab('incidents')" id="tab-incidents"
+                class="tab-btn px-5 py-3.5 text-sm font-medium border-b-2 transition-colors
+                {% if active_tab == 'incidents' %}
+                    border-accent-400 text-accent-400
+                {% else %}
+                    border-transparent text-gray-400 hover:text-gray-200 hover:border-dark-400
+                {% endif %}">
+                <i class="fa-solid fa-bug text-xs mr-1.5"></i>
+                Incidents
+                {% if incidents %}
+                <span class="ml-2 text-xs bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full">{{ incidents|length }}</span>
+                {% endif %}
+            </button>
+            <button onclick="switchTab('findings')" id="tab-findings"
+                class="tab-btn px-5 py-3.5 text-sm font-medium border-b-2 transition-colors
+                {% if active_tab == 'findings' %}
+                    border-accent-400 text-accent-400
+                {% else %}
+                    border-transparent text-gray-400 hover:text-gray-200 hover:border-dark-400
+                {% endif %}">
+                <i class="fa-solid fa-magnifying-glass text-xs mr-1.5"></i>
+                Findings
+                {% if findings %}
+                <span class="ml-2 text-xs bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full">{{ findings|length }}</span>
+                {% endif %}
+            </button>
+        </div>
+    </div>
+
+    <!-- Step Results Panel -->
+    <div id="panel-steps" class="p-5" style="display: {% if active_tab and active_tab != 'steps' %}none{% else %}block{% endif %};">
+        {% if results %}
+        <div class="space-y-3">
+            {% for result in results %}
+            <div class="card overflow-hidden">
+                <div class="px-5 py-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="inline-flex items-center justify-center h-9 w-9 rounded-full shrink-0
+                                {% if result.status == 'passed' %}bg-emerald-500/20 text-emerald-400
+                                {% elif result.status == 'failed' %}bg-red-500/20 text-red-400
+                                {% else %}bg-dark-500 text-gray-500{% endif %}">
+                                <i class="fa-solid
+                                    {% if result.status == 'passed' %}fa-check
+                                    {% elif result.status == 'failed' %}fa-xmark
+                                    {% else %}fa-minus{% endif %} text-sm"></i>
+                            </span>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">{{ result.step.name }}</h3>
+                                <p class="text-xs text-gray-500 mt-0.5">{{ result.step.action_description|truncatechars:80 }}</p>
+                            </div>
+                        </div>
+                        <span class="badge
+                            {% if result.status == 'passed' %}badge-green
+                            {% elif result.status == 'failed' %}badge-red
+                            {% else %}badge-gray{% endif %}">
+                            {{ result.get_status_display }}
+                        </span>
+                    </div>
+
+                    {% if result.log_message %}
+                    <div class="mt-3 bg-dark-800 rounded-lg px-3.5 py-2.5 border border-dark-500">
+                        <p class="text-sm text-gray-400 flex items-start gap-2">
+                            <i class="fa-solid fa-terminal text-xs text-gray-600 mt-0.5 shrink-0"></i>
+                            {{ result.log_message }}
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-16">
+            <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4 mx-auto">
+                <i class="fa-solid fa-vial text-2xl text-gray-500"></i>
+            </div>
+            <p class="text-gray-400">No step results yet. Steps have not been executed for this run.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Incidents Panel -->
+    <div id="panel-incidents" class="p-5" style="display: {% if not active_tab or active_tab == 'incidents' %}none{% else %}block{% endif %};">
+        {% if incidents %}
+        <div class="space-y-3">
+            {% for incident in incidents %}
+            <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <h4 class="text-sm font-semibold text-red-300 flex items-center gap-1.5">
+                        <i class="fa-solid fa-circle-exclamation text-xs"></i>
+                        {{ incident.summary|strip_severity_prefix }}
+                    </h4>
+                    <span class="badge
+                        {% if incident.severity == 'high' %}badge-red
+                        {% elif incident.severity == 'medium' %}badge-yellow
+                        {% else %}badge-blue{% endif %}">
+                        {{ incident.get_severity_display }}
+                    </span>
+                </div>
+                <div class="mt-2.5 bg-dark-800/50 rounded-md p-3 border border-dark-500">
+                    <p class="text-xs text-gray-400 whitespace-pre-line flex items-start gap-2">
+                        <i class="fa-solid fa-list-ol text-xs text-gray-600 mt-0.5 shrink-0"></i>
+                        {{ incident.reproduction_steps }}
+                    </p>
+                </div>
+                <div class="mt-2.5 flex items-center gap-3">
+                    {% if incident.resolved %}
+                    <span class="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                        <i class="fa-solid fa-circle-check"></i>
+                        Resolved
+                    </span>
+                    {% else %}
+                    <span class="text-xs text-red-400 font-medium flex items-center gap-1">
+                        <i class="fa-regular fa-circle"></i>
+                        Open
+                    </span>
+                    {% endif %}
+                    {% if incident.assigned_to %}
+                    <span class="text-xs text-gray-500 flex items-center gap-1">
+                        <i class="fa-regular fa-user"></i>
+                        {{ incident.assigned_to.get_full_name|default:incident.assigned_to.username }}
+                    </span>
+                    {% endif %}
+                    <span class="text-xs text-gray-500 flex items-center gap-1">
+                        <i class="fa-regular fa-clock"></i>
+                        {{ incident.created_at|date:"M d, H:i" }}
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-10">
+            <div class="w-12 h-12 rounded-full bg-dark-600 flex items-center justify-center mb-3 mx-auto">
+                <i class="fa-solid fa-bug text-xl text-gray-500"></i>
+            </div>
+            <p class="text-sm text-gray-500">No incidents recorded for this run.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Findings Panel -->
+    <div id="panel-findings" class="p-5" style="display: {% if not active_tab or active_tab == 'findings' %}none{% else %}block{% endif %};">
+        {% if findings %}
+        <div class="space-y-3">
+            {% for finding in findings %}
+            <div class="bg-amber-500/5 border border-amber-500/15 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2.5">
+                        <i class="fa-solid fa-magnifying-glass text-amber-400 text-sm"></i>
+                        <h4 class="text-sm font-semibold text-white">{{ finding.title }}</h4>
+                    </div>
+                    <span class="badge
+                        {% if finding.category == 'critical' %}badge-red
+                        {% elif finding.category == 'recommendation' %}badge-green
+                        {% elif finding.category == 'suggestion' %}badge-yellow
+                        {% else %}badge-blue{% endif %}">
+                        {{ finding.get_category_display }}
+                    </span>
+                </div>
+                <div class="mt-2.5 bg-dark-800/50 rounded-md p-3 border border-dark-500">
+                    <p class="text-xs text-gray-400 whitespace-pre-line">{{ finding.description }}</p>
+                </div>
+                <div class="mt-2">
+                    <span class="text-xs text-gray-500 flex items-center gap-1">
+                        <i class="fa-regular fa-clock"></i>
+                        {{ finding.created_at|date:"M d, Y H:i" }}
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-10">
+            <div class="w-12 h-12 rounded-full bg-dark-600 flex items-center justify-center mb-3 mx-auto">
+                <i class="fa-solid fa-magnifying-glass text-xl text-gray-500"></i>
+            </div>
+            <p class="text-sm text-gray-500">No findings recorded for this run.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchTab(tabName) {
+    document.getElementById('panel-steps').style.display = tabName === 'steps' ? 'block' : 'none';
+    document.getElementById('panel-incidents').style.display = tabName === 'incidents' ? 'block' : 'none';
+    document.getElementById('panel-findings').style.display = tabName === 'findings' ? 'block' : 'none';
+
+    const tabs = {
+        steps: document.getElementById('tab-steps'),
+        incidents: document.getElementById('tab-incidents'),
+        findings: document.getElementById('tab-findings'),
+    };
+
+    Object.keys(tabs).forEach(key => {
+        const tab = tabs[key];
+        if (key === tabName) {
+            tab.classList.add('border-accent-400', 'text-accent-400');
+            tab.classList.remove('border-transparent', 'text-gray-400');
+        } else {
+            tab.classList.remove('border-accent-400', 'text-accent-400');
+            tab.classList.add('border-transparent', 'text-gray-400');
+        }
+    });
+}
+</script>
+{% endblock %}

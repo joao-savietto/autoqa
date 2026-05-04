@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Edit Step: {{ step.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <a href="{% url 'plan_detail' step.plan.id %}" class="text-sm text-gray-400 hover:text-accent-400 mb-4 inline-flex items-center gap-1.5 transition-colors">
+        <i class="fa-solid fa-arrow-left text-xs"></i>
+        Back to Plan
+    </a>
+    <div class="card">
+        <div class="px-6 py-4 border-b border-dark-500">
+            <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+                <i class="fa-regular fa-pen-to-square text-accent-400"></i>
+                Edit Step
+            </h2>
+        </div>
+        <form method="post" class="px-6 py-5 space-y-4">
+            {% csrf_token %}
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-pen text-xs text-gray-500 mr-1"></i>Name <span class="text-red-400">*</span>
+                </label>
+                <input type="text" name="name" value="{{ step.name }}" required class="input-dark">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-hand-pointer text-xs text-gray-500 mr-1"></i>Action Description <span class="text-red-400">*</span>
+                </label>
+                <textarea name="action_description" rows="3" required class="input-dark resize-none">{{ step.action_description }}</textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-link text-xs text-gray-500 mr-1"></i>Preconditions
+                </label>
+                <textarea name="preconditions" rows="2" class="input-dark resize-none">{{ step.preconditions }}</textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-flag-checkered text-xs text-gray-500 mr-1"></i>Expected Outcome <span class="text-red-400">*</span>
+                </label>
+                <textarea name="expected_outcome" rows="2" required class="input-dark resize-none">{{ step.expected_outcome }}</textarea>
+            </div>
+            <div class="flex items-center pt-2">
+                <input type="checkbox" name="active" id="active" {% if step.active %}checked{% endif %}
+                       class="h-4 w-4 rounded border-dark-400 bg-dark-800 text-accent-600 focus:ring-accent-500 focus:ring-offset-dark-700">
+                <label for="active" class="ml-2.5 flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer">
+                    <i class="fa-solid fa-toggle-on text-xs text-gray-500"></i>
+                    Active
+                </label>
+            </div>
+            <div class="flex justify-end space-x-3 pt-4 border-t border-dark-500 mt-2">
+                <a href="{% url 'plan_detail' step.plan.id %}" class="btn-ghost">
+                    <i class="fa-solid fa-xmark text-xs mr-1.5"></i>
+                    Cancel
+                </a>
+                <button type="submit" class="btn-primary">
+                    <i class="fa-solid fa-floppy-disk text-xs mr-1.5"></i>
+                    Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

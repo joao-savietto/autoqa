@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.name }} - AutoQA{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <a href="{% url 'dashboard' %}" class="text-sm text-gray-400 hover:text-accent-400 mb-3 inline-flex items-center gap-1.5 transition-colors">
+        <i class="fa-solid fa-arrow-left text-xs"></i>
+        Back to Dashboard
+    </a>
+    <div class="sm:flex sm:items-center sm:justify-between">
+        <div>
+            <div class="flex items-center gap-2">
+                <span class="badge {% if plan.plan_type == 'security' %}badge-red{% else %}badge-blue{% endif %} text-[10px] px-1.5 py-0">
+                    {% if plan.plan_type == 'security' %}
+                        <i class="fa-solid fa-shield-halved mr-1 text-[9px]"></i>Security
+                    {% else %}
+                        <i class="fa-solid fa-vial mr-1 text-[9px]"></i>QA
+                    {% endif %}
+                </span>
+                <h1 class="text-2xl font-bold text-white flex items-center gap-2.5">
+                    <i class="fa-regular fa-file-lines text-accent-400"></i>
+                    {{ plan.name }}
+                </h1>
+            </div>
+            {% if plan.project_name %}
+            <p class="mt-1.5 text-sm text-gray-400 flex items-center gap-1.5">
+                <i class="fa-solid fa-folder-open text-xs text-gray-500"></i>
+                {{ plan.project_name }}
+            </p>
+            {% endif %}
+        </div>
+        <div class="mt-4 sm:mt-0 flex space-x-2">
+            {% if plan.plan_type != 'security' %}
+            <button onclick="document.getElementById('newStepModal').classList.remove('hidden')"
+                    class="btn-primary gap-2">
+                <i class="fa-solid fa-plus text-xs"></i>
+                Add Step
+            </button>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="border-b border-dark-500 mb-6">
+    <nav class="-mb-px flex space-x-8">
+        {% if plan.plan_type != 'security' %}
+        <button onclick="switchTab('steps')" id="tabSteps"
+                class="tab-btn border-accent-500 text-accent-400 whitespace-nowrap py-3.5 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors">
+            <i class="fa-solid fa-list-check text-xs"></i>
+            Test Steps <span class="badge badge-blue ml-1">{{ steps.count }}</span>
+        </button>
+        {% endif %}
+        <button onclick="switchTab('runs')" id="tabRuns"
+                class="tab-btn border-accent-500 text-accent-400 whitespace-nowrap py-3.5 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors">
+            <i class="fa-solid fa-clock-rotate-left text-xs"></i>
+            Run History <span class="badge badge-gray ml-1">{{ runs.count }}</span>
+        </button>
+    </nav>
+</div>
+
+<!-- Tab Content: Steps -->
+<div id="panelSteps" class="tab-panel {% if plan.plan_type == 'security' %}hidden{% endif %}">
+    {% if steps %}
+    <div class="card overflow-hidden">
+        <table class="table-dark">
+            <thead>
+                <tr>
+                    <th class="w-16">#</th>
+                    <th>Name</th>
+                    <th>Action</th>
+                    <th>Expected Outcome</th>
+                    <th class="w-28">Status</th>
+                    <th class="w-36 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for step in steps %}
+                <tr>
+                    <td class="text-gray-500 font-mono text-xs">{{ step.order_index }}</td>
+                    <td class="font-medium text-white">{{ step.name }}</td>
+                    <td class="text-gray-400 max-w-xs truncate">{{ step.action_description }}</td>
+                    <td class="text-gray-400 max-w-xs truncate">{{ step.expected_outcome }}</td>
+                    <td>
+                        <span class="badge {% if step.active %}badge-green{% else %}badge-gray{% endif %}">
+                            <i class="fa-solid {% if step.active %}fa-circle-check{% else %}fa-circle-xmark{% endif %} mr-1.5 text-[10px]"></i>
+                            {{ step.active|yesno:"Active,Inactive" }}
+                        </span>
+                    </td>
+                    <td class="text-right">
+                        <a href="{% url 'step_edit' step.id %}" class="text-gray-400 hover:text-accent-400 mr-3 transition-colors" title="Edit">
+                            <i class="fa-regular fa-pen-to-square"></i>
+                        </a>
+                        <button onclick="confirmDeleteStep({{ step.id }}, '{{ step.name }}')"
+                                class="text-gray-400 hover:text-red-400 transition-colors" title="Delete">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-16 card">
+        <div class="flex flex-col items-center">
+            <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4">
+                <i class="fa-solid fa-list-check text-2xl text-gray-500"></i>
+            </div>
+            <p class="text-gray-400">No test steps yet. Add your first step to get started.</p>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Tab Content: Runs -->
+<div id="panelRuns" class="tab-panel {% if plan.plan_type != 'security' %}hidden{% endif %}">
+    {% if runs %}
+    <div class="card overflow-hidden">
+        <table class="table-dark">
+            <thead>
+                <tr>
+                    <th class="w-20">Run #</th>
+                    <th>Started</th>
+                    <th class="w-32">Status</th>
+                    <th class="w-24 text-center">Passed</th>
+                    <th class="w-24 text-center">Failed</th>
+                    <th class="w-24 text-center">Skipped</th>
+                    <th class="w-28 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr>
+                    <td class="font-mono text-sm text-gray-300">{{ run.id }}</td>
+                    <td class="text-gray-400 flex items-center gap-1.5">
+                        <i class="fa-regular fa-clock text-xs text-gray-600"></i>
+                        {{ run.started_at|date:"M d, Y H:i" }}
+                    </td>
+                    <td>
+                        <span class="badge
+                            {% if run.status == 'completed' %}badge-green
+                            {% elif run.status == 'failed' %}badge-red
+                            {% elif run.status == 'running' %}badge-yellow
+                            {% else %}badge-gray{% endif %}">
+                            <i class="fa-solid
+                                {% if run.status == 'completed' %}fa-circle-check
+                                {% elif run.status == 'failed' %}fa-circle-xmark
+                                {% elif run.status == 'running' %}fa-spinner fa-spin
+                                {% else %}fa-circle{% endif %} mr-1.5 text-[10px]"></i>
+                            {{ run.get_status_display }}
+                        </span>
+                    </td>
+                    <td class="text-center text-emerald-400 font-medium">{{ run.passed_steps }}</td>
+                    <td class="text-center text-red-400 font-medium">{{ run.failed_steps }}</td>
+                    <td class="text-center text-gray-500">{{ run.skipped_steps }}</td>
+                    <td class="text-right">
+                        <a href="{% url 'run_detail' run.id %}" class="text-gray-400 hover:text-accent-400 transition-colors flex items-center justify-end gap-1.5 text-sm">
+                            <i class="fa-solid fa-eye text-xs"></i>
+                            View
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-16 card">
+        <div class="flex flex-col items-center">
+            <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4">
+                <i class="fa-solid fa-clock-rotate-left text-2xl text-gray-500"></i>
+            </div>
+            <p class="text-gray-400">No runs yet. Create a test run to begin execution tracking.</p>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- New Step Modal -->
+<div id="newStepModal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <div class="px-6 py-4 border-b border-dark-500 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+                <i class="fa-solid fa-list-check text-accent-400"></i>
+                Add Test Step
+            </h3>
+            <button onclick="document.getElementById('newStepModal').classList.add('hidden')" class="text-gray-500 hover:text-gray-300 transition-colors">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+        <form id="newStepForm" class="px-6 py-5 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-pen text-xs text-gray-500 mr-1"></i>Name <span class="text-red-400">*</span>
+                </label>
+                <input type="text" name="name" required class="input-dark">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-hand-pointer text-xs text-gray-500 mr-1"></i>Action Description <span class="text-red-400">*</span>
+                </label>
+                <textarea name="action_description" rows="2" required class="input-dark resize-none"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-link text-xs text-gray-500 mr-1"></i>Preconditions
+                </label>
+                <textarea name="preconditions" rows="2" class="input-dark resize-none"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-flag-checkered text-xs text-gray-500 mr-1"></i>Expected Outcome <span class="text-red-400">*</span>
+                </label>
+                <textarea name="expected_outcome" rows="2" required class="input-dark resize-none"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-sort text-xs text-gray-500 mr-1"></i>Order Index
+                </label>
+                <input type="number" name="order_index" value="{{ steps.count }}" min="0" class="input-dark">
+            </div>
+        </form>
+        <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end space-x-3 border-t border-dark-500">
+            <button onclick="document.getElementById('newStepModal').classList.add('hidden')" class="btn-ghost">
+                Cancel
+            </button>
+            <button onclick="createStep()" class="btn-primary">
+                <i class="fa-solid fa-check text-xs mr-1.5"></i>
+                Add Step
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Step Confirmation Modal -->
+<div id="deleteStepModal" class="modal-overlay hidden">
+    <div class="modal-content max-w-md">
+        <div class="px-6 py-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-triangle-exclamation text-red-400"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Delete Step</h3>
+                    <p class="text-sm text-gray-400 mt-0.5">This action cannot be undone.</p>
+                </div>
+            </div>
+            <p class="text-sm text-gray-400">Are you sure you want to delete "<span class="text-white font-medium" id="deleteStepName"></span>"?</p>
+        </div>
+        <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end space-x-3 border-t border-dark-500">
+            <button onclick="document.getElementById('deleteStepModal').classList.add('hidden')" class="btn-ghost">
+                Cancel
+            </button>
+            <button id="confirmDeleteStepBtn" class="btn-danger">
+                <i class="fa-regular fa-trash-can text-xs mr-1.5"></i>
+                Delete
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchTab(tab) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('border-accent-500', 'text-accent-400');
+        b.classList.add('border-transparent', 'text-gray-500');
+    });
+
+    if (tab === 'steps') {
+        document.getElementById('panelSteps').classList.remove('hidden');
+        document.getElementById('tabSteps').classList.add('border-accent-500', 'text-accent-400');
+        document.getElementById('tabSteps').classList.remove('border-transparent', 'text-gray-500');
+    } else {
+        document.getElementById('panelRuns').classList.remove('hidden');
+        document.getElementById('tabRuns').classList.add('border-accent-500', 'text-accent-400');
+        document.getElementById('tabRuns').classList.remove('border-transparent', 'text-gray-500');
+    }
+}
+
+function createStep() {
+    const form = document.getElementById('newStepForm');
+    const data = Object.fromEntries(new FormData(form));
+    data.plan = {{ plan.id }};
+
+    fetch('/api/test-steps/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+    })
+    .then(res => {
+        if (res.ok) {
+            location.reload();
+        } else {
+            res.json().then(json => alert('Failed to create step: ' + JSON.stringify(json)));
+        }
+    });
+}
+
+function confirmDeleteStep(stepId, stepName) {
+    document.getElementById('deleteStepName').textContent = stepName;
+    document.getElementById('deleteStepModal').classList.remove('hidden');
+    document.getElementById('confirmDeleteStepBtn').onclick = function() {
+        window.location.href = '/step/' + stepId + '/delete/';
+    };
+}
+</script>
+{% endblock %}

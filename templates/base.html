@@ -1,0 +1,62 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-dark-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AutoQA{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}">
+    <link rel="stylesheet" href="{% static 'css/output.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="h-full">
+    <nav class="bg-dark-800 border-b border-dark-500 sticky top-0 z-40 backdrop-blur-sm bg-dark-800/95">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="{% url 'dashboard' %}" class="flex items-center gap-2.5 text-xl font-bold text-accent-400 hover:text-accent-300 transition-colors">
+                        <i class="fa-solid fa-shield-halved text-accent-500"></i>
+                        <span>AutoQA</span>
+                    </a>
+                    <div class="ml-10 flex items-baseline space-x-1">
+                        <a href="{% url 'dashboard' %}"
+                           class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors {% if request.path == '/dashboard/' %}bg-accent-500/15 text-accent-400{% else %}text-gray-400 hover:text-gray-200 hover:bg-dark-600{% endif %}">
+                            <i class="fa-solid fa-table-columns text-xs"></i>
+                            Dashboard
+                        </a>
+                        <a href="{% url 'api_keys' %}"
+                           class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors {% if request.path == '/api-keys/' %}bg-accent-500/15 text-accent-400{% else %}text-gray-400 hover:text-gray-200 hover:bg-dark-600{% endif %}">
+                            <i class="fa-solid fa-key text-xs"></i>
+                            API Keys
+                        </a>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span class="text-sm text-gray-400 hidden sm:inline-flex items-center gap-2">
+                        <i class="fa-regular fa-circle-user"></i>
+                        {{ user.get_full_name|default:user.username }}
+                    </span>
+                    <form action="{% url 'logout' %}" method="post" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-400 transition-colors">
+                            <i class="fa-solid fa-right-from-bracket text-xs"></i>
+                            <span class="hidden sm:inline">Logout</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

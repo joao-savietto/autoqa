@@ -1,0 +1,45 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8234:8234"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=backend.settings
+      - CHROME_HOST=chrome
+    command: gunicorn backend.wsgi:application --bind 0.0.0.0:8234 --workers 2 --reload
+    depends_on:
+      - chrome
+
+  mcp_server:
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    ports:
+      - "3157:3157"
+    volumes:
+      - .:/app
+    environment:
+      - DJANGO_SETTINGS_MODULE=backend.settings
+      - MCP_API_URL=http://web:8234
+    command: python mcp_server/server.py
+    depends_on:
+      - web
+
+  chrome:
+    build: ./chrome
+    ports:
+      - "9222:9222"
+    shm_size: "2gb"
+
+  kali:
+    build: ./kali
+    container_name: autoqa-kali
+    command: tail -f /dev/null
+    deploy:
+      resources:
+        limits:
+          memory: 4G

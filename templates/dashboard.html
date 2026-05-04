@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - AutoQA{% endblock %}
+
+{% block content %}
+<div class="sm:flex sm:items-center sm:justify-between mb-8">
+    <div>
+        <h1 class="text-2xl font-bold text-white flex items-center gap-2.5">
+            <i class="fa-solid fa-clipboard-list text-accent-400"></i>
+            Test Plans
+        </h1>
+        <p class="mt-1.5 text-sm text-gray-400">Manage your QA test plans and track execution history.</p>
+    </div>
+    <div class="mt-4 sm:mt-0">
+        <button onclick="document.getElementById('newPlanModal').classList.remove('hidden')"
+                class="btn-primary gap-2">
+            <i class="fa-solid fa-plus text-xs"></i>
+            New Plan
+        </button>
+    </div>
+</div>
+
+<!-- Search/Filter -->
+<div class="mb-6">
+    <div class="max-w-md relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm"></i>
+        <input type="text" id="searchInput" placeholder="Search plans..."
+               class="input-dark pl-10"
+               oninput="filterPlans()">
+    </div>
+</div>
+
+<!-- Plan Cards Grid -->
+<div id="plansGrid" class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+    {% for plan in plans %}
+    <div class="plan-card card card-hover group"
+         data-name="{{ plan.name|lower }}" data-project="{{ plan.project_name|lower }}">
+        <div class="px-5 py-5">
+            <div class="flex items-start justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <span class="badge {% if plan.plan_type == 'security' %}badge-red{% else %}badge-blue{% endif %} text-[10px] px-1.5 py-0">
+                            {% if plan.plan_type == 'security' %}
+                                <i class="fa-solid fa-shield-halved mr-1 text-[9px]"></i>SEC
+                            {% else %}
+                                <i class="fa-solid fa-vial mr-1 text-[9px]"></i>QA
+                            {% endif %}
+                        </span>
+                        <h3 class="text-base font-semibold text-white truncate group-hover:text-accent-400 transition-colors">
+                            <a href="{% url 'plan_detail' plan.id %}" class="flex items-center gap-2">
+                                <i class="fa-regular fa-file-lines text-gray-500 text-sm"></i>
+                                {{ plan.name }}
+                            </a>
+                        </h3>
+                    </div>
+                    {% if plan.project_name %}
+                    <p class="mt-1 text-sm text-gray-500 flex items-center gap-1.5">
+                        <i class="fa-solid fa-folder-open text-xs text-gray-600"></i>
+                        {{ plan.project_name }}
+                    </p>
+                    {% endif %}
+                </div>
+                <span class="badge badge-blue shrink-0">
+                    <i class="fa-solid fa-list-ol mr-1.5 text-[10px]"></i>
+                    {{ plan.total_steps }}
+                </span>
+            </div>
+
+            {% if plan.test_scope %}
+            <p class="mt-3 text-sm text-gray-400 line-clamp-2 leading-relaxed">{{ plan.test_scope }}</p>
+            {% endif %}
+
+            <div class="mt-4 flex items-center justify-between text-xs text-gray-500 pt-3 border-t border-dark-500">
+                <span class="flex items-center gap-1.5">
+                    <i class="fa-regular fa-calendar text-[10px]"></i>
+                    {{ plan.created_at|date:"M d, Y" }}
+                </span>
+                {% if plan.latest_run %}
+                <a href="{% url 'run_detail' plan.latest_run.id %}" class="flex items-center gap-1.5 hover:text-accent-400 transition-colors">
+                    <i class="fa-solid fa-clock-rotate-left text-[10px]"></i>
+                    {{ plan.latest_run.started_at|date:"M d" }}
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        <div class="bg-dark-800/50 px-5 py-3 flex justify-between items-center border-t border-dark-500 rounded-b-xl">
+            <a href="{% url 'plan_detail' plan.id %}"
+               class="text-sm font-medium text-accent-400 hover:text-accent-300 transition-colors flex items-center gap-1.5">
+                <i class="fa-solid fa-arrow-right text-xs"></i>
+                Details
+            </a>
+            <button onclick="confirmDeletePlan({{ plan.id }}, '{{ plan.name }}')"
+                    class="text-sm font-medium text-gray-500 hover:text-red-400 transition-colors flex items-center gap-1.5">
+                <i class="fa-regular fa-trash-can text-xs"></i>
+            </button>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-span-full text-center py-16 card">
+        <div class="flex flex-col items-center">
+            <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4">
+                <i class="fa-regular fa-clipboard text-2xl text-gray-500"></i>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-300">No test plans yet</h3>
+            <p class="mt-1.5 text-sm text-gray-500">Get started by creating your first test plan.</p>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- New Plan Modal -->
+<div id="newPlanModal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <div class="px-6 py-4 border-b border-dark-500 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+                <i class="fa-solid fa-circle-plus text-accent-400"></i>
+                Create New Test Plan
+            </h3>
+            <button onclick="document.getElementById('newPlanModal').classList.add('hidden')" class="text-gray-500 hover:text-gray-300 transition-colors">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+        <form method="post" action="{% url 'api:testplan-list' %}" id="newPlanForm" class="px-6 py-5 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-pen text-xs text-gray-500 mr-1"></i>Name <span class="text-red-400">*</span>
+                </label>
+                <input type="text" name="name" required class="input-dark">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-folder text-xs text-gray-500 mr-1"></i>Project Name
+                </label>
+                <input type="text" name="project_name" class="input-dark">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-crosshairs text-xs text-gray-500 mr-1"></i>Test Scope
+                </label>
+                <textarea name="test_scope" rows="3" class="input-dark resize-none"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-ban text-xs text-gray-500 mr-1"></i>Exclude Scope
+                </label>
+                <textarea name="exclude_scope" rows="2" class="input-dark resize-none"></textarea>
+            </div>
+        </form>
+        <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end space-x-3 border-t border-dark-500">
+            <button onclick="document.getElementById('newPlanModal').classList.add('hidden')" class="btn-ghost">
+                Cancel
+            </button>
+            <button onclick="createPlan()" class="btn-primary">
+                <i class="fa-solid fa-check text-xs mr-1.5"></i>
+                Create Plan
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="modal-overlay hidden">
+    <div class="modal-content max-w-md">
+        <div class="px-6 py-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-triangle-exclamation text-red-400"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Delete Test Plan</h3>
+                    <p class="text-sm text-gray-400 mt-0.5">This action cannot be undone.</p>
+                </div>
+            </div>
+            <p class="text-sm text-gray-400 leading-relaxed">Are you sure you want to delete "<span class="text-white font-medium" id="deletePlanName"></span>"? This will also delete all steps, runs, and incidents.</p>
+        </div>
+        <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end space-x-3 border-t border-dark-500">
+            <button onclick="document.getElementById('deleteModal').classList.add('hidden')" class="btn-ghost">
+                Cancel
+            </button>
+            <button id="confirmDeleteBtn" class="btn-danger">
+                <i class="fa-regular fa-trash-can text-xs mr-1.5"></i>
+                Delete
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterPlans() {
+    const query = document.getElementById('searchInput').value.toLowerCase();
+    document.querySelectorAll('.plan-card').forEach(card => {
+        const name = card.dataset.name || '';
+        const project = card.dataset.project || '';
+        card.style.display = (name.includes(query) || project.includes(query)) ? '' : 'none';
+    });
+}
+
+function confirmDeletePlan(planId, planName) {
+    document.getElementById('deletePlanName').textContent = planName;
+    document.getElementById('deleteModal').classList.remove('hidden');
+    document.getElementById('confirmDeleteBtn').onclick = function() {
+        window.location.href = '/plan/' + planId + '/delete/';
+    };
+}
+
+function createPlan() {
+    const form = document.getElementById('newPlanForm');
+    const formData = new FormData(form);
+    fetch(form.action, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(Object.fromEntries(formData)),
+    })
+    .then(res => {
+        if (res.ok) {
+            location.reload();
+        } else {
+            alert('Failed to create plan. Please try again.');
+        }
+    });
+}
+</script>
+{% endblock %}

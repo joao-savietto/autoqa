@@ -1,0 +1,72 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-dark-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - AutoQA</title>
+    <link rel="stylesheet" href="{% static 'css/output.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        html { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body class="h-full flex items-center justify-center bg-dark-900">
+    <div class="min-h-full flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8">
+        <div class="sm:mx-auto sm:w-full sm:max-w-md">
+            <div class="flex flex-col items-center">
+                <div class="w-16 h-16 rounded-2xl bg-accent-500/15 border border-accent-500/30 flex items-center justify-center mb-4">
+                    <i class="fa-solid fa-shield-halved text-3xl text-accent-400"></i>
+                </div>
+                <h2 class="text-3xl font-bold text-white">AutoQA</h2>
+                <p class="mt-2 text-sm text-gray-400">Quality Assurance Tracking Platform</p>
+            </div>
+        </div>
+
+        <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+            <div class="card py-8 px-6 shadow-2xl">
+                {% if form.errors %}
+                <div class="mb-5 alert-error">
+                    <p class="text-sm text-red-300 flex items-center gap-2">
+                        <i class="fa-solid fa-circle-exclamation text-xs"></i>
+                        Invalid username or password.
+                    </p>
+                </div>
+                {% endif %}
+
+                <form method="post" class="space-y-5">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'dashboard' %}">
+
+                    <div>
+                        <label for="id_username" class="block text-sm font-medium text-gray-300 mb-1.5">
+                            <i class="fa-regular fa-user text-xs text-gray-500 mr-1"></i>Username
+                        </label>
+                        <input type="text" name="username" id="id_username" required
+                               class="input-dark">
+                    </div>
+
+                    <div>
+                        <label for="id_password" class="block text-sm font-medium text-gray-300 mb-1.5">
+                            <i class="fa-solid fa-lock text-xs text-gray-500 mr-1"></i>Password
+                        </label>
+                        <input type="password" name="password" id="id_password" required
+                               class="input-dark">
+                    </div>
+
+                    <div>
+                        <button type="submit"
+                                class="w-full flex justify-center items-center py-2.5 px-4 bg-accent-600 hover:bg-accent-700 rounded-lg text-sm font-medium text-white shadow-sm transition-colors">
+                            <i class="fa-solid fa-right-to-bracket text-xs mr-2"></i>
+                            Sign in
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
