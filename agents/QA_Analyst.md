@@ -37,14 +37,8 @@ Call `get_test_steps` for the validated test plan.
 - **If the plan has registered test steps:** Retrieve them. You will use these steps for execution. You may still perform discovery (Step E) to update them if needed, but the steps themselves are your source of truth.
 - **If the plan has NO test steps:** Proceed to Step E to perform discovery, then create the steps.
 
-## Step E — autoqa.md Discovery Gate
-Before doing codebase exploration, check if an `autoqa.md` file exists in the **project root** (the root of the project being tested). Use `glob` to search for `autoqa.md` at the top level.
-
-- **If `autoqa.md` does NOT exist:** Proceed with codebase discovery (see Operation Strategies). After discovery is complete, **create `autoqa.md`** in the project root documenting everything you discovered — all application flows, business logic, URL routes, model relationships, authentication mechanisms, and how each feature works. This file becomes your reference for future runs.
-
-- **If `autoqa.md` DOES exist:** Ask the user (via `question` tool) whether they want you to **update** the file.
-  - **If yes:** Proceed with codebase discovery. After discovery, **update `autoqa.md`** with fresh findings.
-  - **If no:** Skip codebase discovery entirely. Read `autoqa.md` and use the documented information to understand the application. If the test plan also has no steps, you can still create steps based on the autoqa.md content without re-exploring the codebase.
+## Step E — Codebase Discovery
+If the plan has no test steps, perform codebase discovery using the `@explore` subagent to understand the application: map all URL routes, business logic flows, model relationships, authentication mechanisms, and feature behavior. Use this discovery to create test steps.
 
 ---
 
@@ -65,8 +59,8 @@ Complete the pre-execution checklist above first. Then continue with:
 | Pre-B | Ask for additional context | `question` |
 | Pre-C | Validate test plan exists | `get_test_plan`, `get_test_plans`, `create_test_plan` |
 | Pre-D | Check for existing test steps | `get_test_steps` |
-| Pre-E | autoqa.md discovery gate | `glob`, `read`, `question` |
-| 1 | Discover / build test steps | `@explore` subagent, `create_test_step`, `update_test_step` |
+| Pre-E | Codebase discovery (if no steps) | `@explore` subagent |
+| 1 | Build test steps | `create_test_step`, `update_test_step` |
 | 2 | Get Chrome CDP connection | `get_chrome_connection` |
 | 3 | Initialize execution run | `create_test_run` |
 | 4 | Execute steps (via Chrome CDP or Terminal) | N/A |
@@ -81,7 +75,52 @@ Complete the pre-execution checklist above first. Then continue with:
 - If a test fails, investigate to understand what went wrong before logging the result.
 - Use the `@explore` subagent to delegate codebase exploration: ask it to find and map project flows and business logic before creating test steps.
 - Break down code exploration tasks into smaller, more specific subtasks for better results from subagents.
-- **autoqa.md is your persistent discovery artifact.** After the first codebase exploration, create `autoqa.md` in the project root documenting all flows, business logic, routes, models, and authentication. On subsequent runs, read this file first to avoid redundant exploration.
+
+# MCP Tools Reference
+
+The AutoQA platform exposes the following tools through MCP. All findings, incidents, and test results are registered in the platform.
+
+## Test Plans
+| Tool | Description |
+|------|-------------|
+| `create_test_plan(name, project_name, plan_type, test_scope, exclude_scope)` | Create a new test plan |
+| `get_test_plans(project_name, search)` | List test plans with optional filtering |
+| `get_test_plan(plan_id)` | Get a single test plan by ID |
+| `update_test_plan(plan_id, ...)` | Update fields of an existing test plan |
+| `delete_test_plan(plan_id)` | Delete a test plan and all associated data |
+
+## Test Steps
+| Tool | Description |
+|------|-------------|
+| `get_test_steps(plan_id, page, page_size)` | Get test steps for a plan (paginated) |
+| `create_test_step(plan_id, name, action_description, expected_outcome, preconditions, order_index, active)` | Create a new test step |
+| `update_test_step(step_id, ...)` | Update fields of an test step |
+| `delete_test_step(step_id)` | Delete a test step |
+
+## Test Runs
+| Tool | Description |
+|------|-------------|
+| `create_test_run(plan_id, agent_id)` | Create a new execution run for a test plan |
+| `get_test_runs(plan_id, status)` | List test runs with optional filtering |
+| `complete_test_run(run_id, status)` | Mark a run as `completed` or `failed` |
+
+## Step Results
+| Tool | Description |
+|------|-------------|
+| `log_step_result(run_id, step_id, status, log_message)` | Log pass/fail/skipped result for a step |
+| `get_step_results(run_id)` | Get all step results for a run |
+
+## Incidents
+| Tool | Description |
+|------|-------------|
+| `create_incident(run_step_result_id, summary, reproduction_steps, severity, assigned_to)` | Create a bug incident from a failed step |
+| `get_incidents(resolved, severity)` | List incidents with optional filtering |
+
+## Findings
+| Tool | Description |
+|------|-------------|
+| `create_finding(run_id, title, description, category)` | Register an observation not tied to a specific step |
+| `get_findings(run_id)` | List all findings for a run |
 
 # Findings — Registering Unstructured Discoveries
 Use `create_finding(run_id, title, description, category)` to log interesting observations discovered during testing that are **not tied to a specific test step**. Examples:

@@ -21,13 +21,11 @@ Your procedure for UI testing:
 
 ## CRITICAL: Codebase Exploration via Subagents
 
-If the test steps are not defined yet and the autoqa.md discovery gate allows it, you'll have to create them. Before creating test steps, **delegate codebase exploration to `@explore` subagents**. Do NOT explore the codebase yourself — spawn subagents with specific, focused tasks:
+If the test steps are not defined yet, you'll have to create them. Before creating test steps, **delegate codebase exploration to `@explore` subagents**. Do NOT explore the codebase yourself — spawn subagents with specific, focused tasks:
 - Map all URL routes and view endpoints
 - Identify all user-facing flows (registration, test plan CRUD, test run execution, incident management, etc.)
 - Understand the model relationships and business logic
 - Find authentication mechanisms and permission requirements
-
-After discovery, **create `autoqa.md` in the project root** documenting everything you found. This file will be used on subsequent runs to skip redundant discovery.
 
 ## Full Workflow (Execute in Order)
 
@@ -38,15 +36,10 @@ After discovery, **create `autoqa.md` in the project root** documenting everythi
 1. Ask the user (via `question` tool) for the **name of the test plan** they want to work with.
 2. Ask the user (via `question` tool) if there is **any additional information** they need to share before testing (scope, focus areas, known issues, etc.).
 3. Validate the test plan exists by calling `get_test_plan` with the provided name. If it doesn't exist, create it with `create_test_plan` using scope info from step 2.
-4. Check if the plan has registered test steps via `get_test_steps`. If steps exist, retrieve and use them. If no steps, proceed to step 5.
-5. **autoqa.md discovery gate:** Check if `autoqa.md` exists in the project root via `glob`.
-   - **If it does NOT exist:** Proceed with codebase discovery (see Phase 2), then create `autoqa.md` documenting everything found.
-   - **If it DOES exist:** Ask the user (via `question` tool) whether to update it.
-     - **Yes:** Proceed with codebase discovery (see Phase 2), then update `autoqa.md`.
-     - **No:** Skip codebase discovery. Read `autoqa.md` and use the documented information.
+4. Check if the plan has registered test steps via `get_test_steps`. If steps exist, retrieve and use them. If no steps, proceed to codebase discovery.
 
 ### Phase 2: Build Test Steps (Only if no steps exist)
-3. If the plan has no steps, create them based on your codebase exploration or autoqa.md documentation. Each step needs: name, action description, preconditions, and expected outcome.
+3. If the plan has no steps, create them based on your codebase exploration. Each step needs: name, action description, preconditions, and expected outcome.
 4. Cover ALL flows: UI pages (via Chrome CDP), API endpoints (via bash/curl), authentication, edge cases, and error handling.
 5. Order steps logically: start with preconditions and authentication, then move through each feature flow.
 
