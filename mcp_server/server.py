@@ -115,12 +115,13 @@ def create_test_plan(
 
 
 @mcp.tool()
-def get_test_plans(project_name: str = "", search: str = "") -> str:
+def get_test_plans(project_name: str = "", search: str = "", keyword: str = "") -> str:
     """List all test plans with optional filtering.
 
     Args:
         project_name: Filter by project name (partial match)
         search: Search in plan names
+        keyword: Search keyword matching name, project_name, test_scope, or exclude_scope (OR logic)
 
     Returns:
         JSON string with paginated list of test plans
@@ -130,6 +131,8 @@ def get_test_plans(project_name: str = "", search: str = "") -> str:
         params["project_name"] = project_name
     if search:
         params["search"] = search
+    if keyword:
+        params["keyword"] = keyword
     with _client() as client:
         resp = client.get("/api/test-plans/", params=params)
         resp.raise_for_status()
@@ -212,13 +215,14 @@ def delete_test_plan(plan_id: int) -> str:
 
 
 @mcp.tool()
-def get_test_steps(plan_id: int, page: int = None, page_size: int = None) -> str:
+def get_test_steps(plan_id: int, page: int = None, page_size: int = None, keyword: str = "") -> str:
     """Get test steps for a test plan with pagination support.
 
     Args:
         plan_id: The ID of the test plan
         page: Page number (default: 1)
         page_size: Number of items per page (default: 5)
+        keyword: Search keyword matching name or action_description (OR logic)
 
     Returns:
         JSON string with paginated list of test steps
@@ -228,6 +232,8 @@ def get_test_steps(plan_id: int, page: int = None, page_size: int = None) -> str
         params["page"] = page
     if page_size is not None:
         params["page_size"] = page_size
+    if keyword:
+        params["keyword"] = keyword
     with _client() as client:
         resp = client.get("/api/test-steps/", params=params)
         resp.raise_for_status()

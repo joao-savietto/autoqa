@@ -15,6 +15,7 @@ from rest_framework_api_key.models import APIKey
 
 class TestStepPagination(pagination.PageNumberPagination):
     page_size = 5
+    page_size_query_param = 'page_size'
 
 
 class TestPlanViewSet(viewsets.ModelViewSet):
@@ -37,6 +38,16 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         plan_type = self.request.query_params.get('plan_type')
         if plan_type:
             qs = qs.filter(plan_type=plan_type)
+        # Keyword search across name, project_name, test_scope, exclude_scope
+        keyword = self.request.query_params.get('keyword')
+        if keyword:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(name__icontains=keyword)
+                | Q(project_name__icontains=keyword)
+                | Q(test_scope__icontains=keyword)
+                | Q(exclude_scope__icontains=keyword)
+            )
         return qs
 
 
@@ -55,6 +66,10 @@ class TestStepViewSet(viewsets.ModelViewSet):
         plan_id = self.request.query_params.get('plan')
         if plan_id:
             qs = qs.filter(plan_id=plan_id)
+        keyword = self.request.query_params.get('keyword')
+        if keyword:
+            from django.db.models import Q
+            qs = qs.filter(Q(name__icontains=keyword) | Q(action_description__icontains=keyword))
         return qs
 
     @action(detail=False, methods=['post'])
