@@ -23,7 +23,7 @@
                 </span>
             </p>
         </div>
-        <div class="mt-4 sm:mt-0">
+        <div class="mt-4 sm:mt-0 flex items-center gap-3">
             <span class="badge text-sm px-3 py-1
                 {% if run.status == 'completed' %}badge-green
                 {% elif run.status == 'failed' %}badge-red
@@ -36,6 +36,11 @@
                     {% else %}fa-circle{% endif %} mr-2"></i>
                 {{ run.get_status_display }}
             </span>
+            <a href="{% url 'export_run' run.id %}"
+               class="btn-ghost gap-2 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 text-sm">
+                <i class="fa-solid fa-file-excel text-xs"></i>
+                Export Results
+            </a>
         </div>
     </div>
 
@@ -118,6 +123,32 @@
                 <span class="ml-2 text-xs bg-dark-500 text-gray-300 px-1.5 py-0.5 rounded-full">{{ results|length }}</span>
                 {% endif %}
             </button>
+            <button onclick="switchTab('failed')" id="tab-failed"
+                class="tab-btn px-5 py-3.5 text-sm font-medium border-b-2 transition-colors
+                {% if active_tab == 'failed' %}
+                    border-accent-400 text-accent-400
+                {% else %}
+                    border-transparent text-gray-400 hover:text-gray-200 hover:border-dark-400
+                {% endif %}">
+                <i class="fa-solid fa-circle-xmark text-xs mr-1.5"></i>
+                Failed
+                {% if run.failed_steps %}
+                <span class="ml-2 text-xs bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full">{{ run.failed_steps }}</span>
+                {% endif %}
+            </button>
+            <button onclick="switchTab('skipped')" id="tab-skipped"
+                class="tab-btn px-5 py-3.5 text-sm font-medium border-b-2 transition-colors
+                {% if active_tab == 'skipped' %}
+                    border-accent-400 text-accent-400
+                {% else %}
+                    border-transparent text-gray-400 hover:text-gray-200 hover:border-dark-400
+                {% endif %}">
+                <i class="fa-solid fa-forward text-xs mr-1.5"></i>
+                Skipped
+                {% if run.skipped_steps %}
+                <span class="ml-2 text-xs bg-gray-500/20 text-gray-400 px-1.5 py-0.5 rounded-full">{{ run.skipped_steps }}</span>
+                {% endif %}
+            </button>
             <button onclick="switchTab('incidents')" id="tab-incidents"
                 class="tab-btn px-5 py-3.5 text-sm font-medium border-b-2 transition-colors
                 {% if active_tab == 'incidents' %}
@@ -196,6 +227,92 @@
                 <i class="fa-solid fa-vial text-2xl text-gray-500"></i>
             </div>
             <p class="text-gray-400">No step results yet. Steps have not been executed for this run.</p>
+        </div>
+        {% endif %}
+    </div>
+
+   <!-- Failed Panel -->
+    <div id="panel-failed" class="p-5" style="display: {% if active_tab != 'failed' %}none{% else %}block{% endif %};">
+        {% if run.failed_steps %}
+        <div class="space-y-3">
+            {% for result in results %}
+            {% if result.status == 'failed' %}
+            <div class="card overflow-hidden border-l-4 border-l-red-500">
+                <div class="px-5 py-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="inline-flex items-center justify-center h-9 w-9 rounded-full shrink-0 bg-red-500/20 text-red-400">
+                                <i class="fa-solid fa-xmark text-sm"></i>
+                            </span>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">{{ result.step.name }}</h3>
+                                <p class="text-xs text-gray-500 mt-0.5">{{ result.step.action_description|truncatechars:80 }}</p>
+                            </div>
+                        </div>
+                        <span class="badge badge-red">{{ result.get_status_display }}</span>
+                    </div>
+                    {% if result.log_message %}
+                    <div class="mt-3 bg-dark-800 rounded-lg px-3.5 py-2.5 border border-dark-500">
+                        <p class="text-sm text-gray-400 flex items-start gap-2">
+                            <i class="fa-solid fa-terminal text-xs text-gray-600 mt-0.5 shrink-0"></i>
+                            {{ result.log_message }}
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-16">
+            <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4 mx-auto">
+                <i class="fa-solid fa-circle-check text-2xl text-gray-500"></i>
+            </div>
+            <p class="text-gray-400">No failed steps. All tests passed.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Skipped Panel -->
+    <div id="panel-skipped" class="p-5" style="display: {% if active_tab != 'skipped' %}none{% else %}block{% endif %};">
+        {% if run.skipped_steps %}
+        <div class="space-y-3">
+            {% for result in results %}
+            {% if result.status == 'skipped' %}
+            <div class="card overflow-hidden border-l-4 border-l-gray-500">
+                <div class="px-5 py-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="inline-flex items-center justify-center h-9 w-9 rounded-full shrink-0 bg-dark-500 text-gray-500">
+                                <i class="fa-solid fa-minus text-sm"></i>
+                            </span>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">{{ result.step.name }}</h3>
+                                <p class="text-xs text-gray-500 mt-0.5">{{ result.step.action_description|truncatechars:80 }}</p>
+                            </div>
+                        </div>
+                        <span class="badge badge-gray">{{ result.get_status_display }}</span>
+                    </div>
+                    {% if result.log_message %}
+                    <div class="mt-3 bg-dark-800 rounded-lg px-3.5 py-2.5 border border-dark-500">
+                        <p class="text-sm text-gray-400 flex items-start gap-2">
+                            <i class="fa-solid fa-terminal text-xs text-gray-600 mt-0.5 shrink-0"></i>
+                            {{ result.log_message }}
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-16">
+            <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4 mx-auto">
+                <i class="fa-solid fa-forward text-2xl text-gray-500"></i>
+            </div>
+            <p class="text-gray-400">No skipped steps.</p>
         </div>
         {% endif %}
     </div>
@@ -307,11 +424,15 @@
 <script>
 function switchTab(tabName) {
     document.getElementById('panel-steps').style.display = tabName === 'steps' ? 'block' : 'none';
+    document.getElementById('panel-failed').style.display = tabName === 'failed' ? 'block' : 'none';
+    document.getElementById('panel-skipped').style.display = tabName === 'skipped' ? 'block' : 'none';
     document.getElementById('panel-incidents').style.display = tabName === 'incidents' ? 'block' : 'none';
     document.getElementById('panel-findings').style.display = tabName === 'findings' ? 'block' : 'none';
 
     const tabs = {
         steps: document.getElementById('tab-steps'),
+        failed: document.getElementById('tab-failed'),
+        skipped: document.getElementById('tab-skipped'),
         incidents: document.getElementById('tab-incidents'),
         findings: document.getElementById('tab-findings'),
     };

@@ -22,4 +22,6 @@ urlpatterns = [
     path('plan/<int:plan_id>/delete/', web_views.plan_delete, name='plan_delete'),
     path('api-keys/', web_views.api_keys_view, name='api_keys'),
     path('api/chrome-connection/', web_views.chrome_connection_view, name='chrome_connection'),
+    path('plan/<int:plan_id>/export-steps/', web_views.export_steps_xlsx, name='export_steps'),
+    path('run/<int:run_id>/export/', web_views.export_run_results_xlsx, name='export_run'),
 ]

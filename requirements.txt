@@ -6,3 +6,4 @@ django-filter==24.3.*
 gunicorn==23.0.*
 Pillow==11.1.*
 whitenoise==6.7.*
+openpyxl==3.1.*

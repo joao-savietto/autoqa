@@ -37,6 +37,11 @@
                 Add Step
             </button>
             {% endif %}
+            <a href="{% url 'export_steps' plan.id %}"
+               class="btn-ghost gap-2 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10">
+                <i class="fa-solid fa-file-excel text-xs"></i>
+                Export Steps
+            </a>
         </div>
     </div>
 </div>
