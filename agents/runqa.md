@@ -39,7 +39,7 @@ If the test steps are not defined yet, you'll have to create them. Before creati
 4. Check if the plan has registered test steps via `get_test_steps`. If steps exist, retrieve and use them. If no steps, proceed to codebase discovery.
 
 ### Phase 2: Build Test Steps (Only if no steps exist)
-3. If the plan has no steps, create them based on your codebase exploration. Each step needs: name, action description, preconditions, and expected outcome.
+3. If the plan has no steps, create them based on your codebase exploration. Use `bulk_create_test_steps` to create all steps in a single call — pass them as a JSON array. Each step needs: name, action description, preconditions, and expected outcome.
 4. Cover ALL flows: UI pages (via Chrome CDP), API endpoints (via bash/curl), authentication, edge cases, and error handling.
 5. Order steps logically: start with preconditions and authentication, then move through each feature flow.
 
@@ -48,7 +48,7 @@ If the test steps are not defined yet, you'll have to create them. Before creati
 7. Retrieve steps in small batches with `get_test_steps`.
 8. **For each UI step:** Connect to Chrome CDP, navigate, interact, verify outcomes, and capture evidence on failure.
 9. **For each API step:** Use `bash` with curl to test endpoints.
-10. Log every result immediately with `log_step_result` (passed/failed/skipped + log message).
+10. Log results in batches using `bulk_log_step_results` (passed/failed/skipped + log message) — collect results for each batch of steps and log them together.
 11. **For every failure:** Investigate the root cause first, then call `create_incident` immediately with summary, reproduction steps, and severity.
 12. **For every interesting observation not tied to a specific step:** Call `create_finding(run_id, title, description, category)` with the appropriate category. Register findings for UX insights, performance notes, unexpected behaviors, data patterns, and security observations discovered during testing.
 
@@ -61,4 +61,5 @@ If the test steps are not defined yet, you'll have to create them. Before creati
 - You are a **tester, not a fixer**. Find bugs, do not fix them.
 - Create incidents for bugs **immediately** upon discovery, not at the end.
 - Register findings for **every** interesting observation during testing — especially UX insights, performance notes, and unexpected behaviors.
+- **Use bulk operations:** `bulk_create_test_steps` for creating steps, `bulk_log_step_results` for logging results. These reduce N API calls to 1.
 - Be thorough: test happy paths, edge cases, and error conditions.

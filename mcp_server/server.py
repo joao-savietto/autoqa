@@ -282,6 +282,52 @@ def create_test_step(
 
 
 @mcp.tool()
+def bulk_create_test_steps(
+    plan_id: int,
+    steps: str,
+) -> str:
+    """Create multiple test steps for a plan in a single request.
+
+    Much more efficient than calling create_test_step repeatedly.
+
+    Args:
+        plan_id: The ID of the test plan
+        steps: JSON string containing a list of step objects. Each step has:
+            - name (required): Name of the step
+            - action_description (required): What action to perform
+            - expected_outcome (required): What should happen after this step
+            - preconditions (optional): Conditions before executing
+            - order_index (optional): Position in sequence (auto-assigned if omitted)
+            - active (optional, default true): Whether this step is active
+
+    Example steps parameter:
+        '[{"name": "Step 1", "action_description": "Do X", "expected_outcome": "X happens"},
+          {"name": "Step 2", "action_description": "Do Y", "expected_outcome": "Y happens"}]'
+
+    Returns:
+        JSON string with count of created steps and their serialized data
+    """
+    try:
+        steps_list = json.loads(steps)
+    except json.JSONDecodeError:
+        return json.dumps({"error": "Invalid JSON in 'steps' parameter."})
+
+    if not isinstance(steps_list, list) or len(steps_list) == 0:
+        return json.dumps({"error": "'steps' must be a non-empty JSON array."})
+
+    with _client() as client:
+        resp = client.post(
+            "/api/test-steps/bulk-create/",
+            json={
+                "plan": plan_id,
+                "steps": steps_list,
+            },
+        )
+        resp.raise_for_status()
+        return json.dumps(resp.json())
+
+
+@mcp.tool()
 def update_test_step(
     step_id: int,
     name: str = None,
@@ -451,17 +497,66 @@ def log_step_result(
 
 
 @mcp.tool()
-def get_step_results(run_id: int) -> str:
-    """Get all step results for a test run.
+def bulk_log_step_results(
+    run_id: int,
+    results: str,
+) -> str:
+    """Log multiple step results for a run in a single request.
+
+    Much more efficient than calling log_step_result repeatedly.
+    Skips results that already exist for a given (run, step) pair.
 
     Args:
         run_id: The ID of the test run
+        results: JSON string containing a list of result objects. Each result has:
+            - step (required): The ID of the test step
+            - status (required): 'passed', 'failed', or 'skipped'
+            - log_message (optional): Execution log or notes
+
+    Example results parameter:
+        '[{"step": 1, "status": "passed", "log_message": "OK"},
+          {"step": 2, "status": "failed", "log_message": "Error found"},
+          {"step": 3, "status": "skipped"}]'
+
+    Returns:
+        JSON string with count of created results, skipped items, and serialized data
+    """
+    try:
+        results_list = json.loads(results)
+    except json.JSONDecodeError:
+        return json.dumps({"error": "Invalid JSON in 'results' parameter."})
+
+    if not isinstance(results_list, list) or len(results_list) == 0:
+        return json.dumps({"error": "'results' must be a non-empty JSON array."})
+
+    with _client() as client:
+        resp = client.post(
+            "/api/step-results/bulk-log/",
+            json={
+                "run": run_id,
+                "results": results_list,
+            },
+        )
+        resp.raise_for_status()
+        return json.dumps(resp.json())
+
+
+@mcp.tool()
+def get_step_results(run_id: int, status: str = None) -> str:
+    """Get all step results for a test run, optionally filtered by status.
+
+    Args:
+        run_id: The ID of the test run
+        status: Filter by result status - 'passed', 'failed', or 'skipped'
 
     Returns:
         JSON string with paginated list of step results
     """
+    params = {"run": run_id}
+    if status:
+        params["status"] = status
     with _client() as client:
-        resp = client.get("/api/step-results/", params={"run": run_id})
+        resp = client.get("/api/step-results/", params=params)
         resp.raise_for_status()
         return json.dumps(resp.json())
 

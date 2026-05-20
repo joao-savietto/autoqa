@@ -8,7 +8,7 @@ from .models import TestPlan, TestStep, TestRun, RunStepResult, Incident, Findin
 from .serializers import (
     TestPlanSerializer, TestStepSerializer, TestRunSerializer,
     RunStepResultSerializer, IncidentSerializer, FindingSerializer,
-    APIKeySerializer,
+    APIKeySerializer, TestStepBulkSerializer, RunStepResultBulkSerializer,
 )
 from rest_framework_api_key.models import APIKey
 
@@ -88,6 +88,38 @@ class TestStepViewSet(viewsets.ModelViewSet):
                 TestStep.objects.filter(id=step_id).update(order_index=order_index)
         return Response({'reordered': len(steps_data)})
 
+    @action(detail=False, methods=['post'])
+    def bulk_create(self, request):
+        """Create multiple test steps for a plan in a single request.
+
+        Payload:
+            {
+                "plan": <plan_id>,
+                "steps": [
+                    {
+                        "name": "...",
+                        "action_description": "...",
+                        "expected_outcome": "...",
+                        "preconditions": "...",   (optional)
+                        "order_index": N,          (optional, auto-assigned)
+                        "active": true             (optional, default true)
+                    },
+                    ...
+                ]
+            }
+
+        Returns serialized step objects with their new IDs.
+        """
+        serializer = TestStepBulkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+
+        created_steps = result['steps']
+        return Response({
+            'created': result['created'],
+            'steps': TestStepSerializer(created_steps, many=True).data,
+        }, status=status.HTTP_201_CREATED)
+
 
 class TestRunViewSet(viewsets.ModelViewSet):
     """CRUD for TestRuns."""
@@ -132,6 +164,37 @@ class RunStepResultViewSet(viewsets.ModelViewSet):
         if run_id:
             qs = qs.filter(run_id=run_id)
         return qs
+
+    @action(detail=False, methods=['post'])
+    def bulk_log(self, request):
+        """Log multiple step results for a run in a single request.
+
+        Payload:
+            {
+                "run": <run_id>,
+                "results": [
+                    {
+                        "step": <step_id>,
+                        "status": "passed" | "failed" | "skipped",
+                        "log_message": "..."   (optional)
+                    },
+                    ...
+                ]
+            }
+
+        Returns serialized result objects with their new IDs.
+        Skips results that already exist for a given (run, step) pair.
+        """
+        serializer = RunStepResultBulkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+
+        created_results = result['results']
+        return Response({
+            'created': result['created'],
+            'skipped': result['skipped'],
+            'results': RunStepResultSerializer(created_results, many=True).data,
+        }, status=status.HTTP_201_CREATED)
 
 
 class IncidentViewSet(viewsets.ModelViewSet):

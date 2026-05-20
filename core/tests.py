@@ -549,3 +549,343 @@ class APIKeyManagementTest(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
+class BulkCreateTestStepsTest(TestCase):
+    """Tests for the bulk_create_test_steps endpoint."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpass')
+        self.plan = TestPlan.objects.create(name='Plan', created_by=self.user)
+        self.client = Client()
+        self.client.login(username='testuser', password='testpass')
+
+    def test_bulk_create_steps_success(self):
+        payload = {
+            'plan': self.plan.id,
+            'steps': [
+                {
+                    'name': 'Step A',
+                    'action_description': 'Do A',
+                    'expected_outcome': 'A happens',
+                },
+                {
+                    'name': 'Step B',
+                    'action_description': 'Do B',
+                    'expected_outcome': 'B happens',
+                    'preconditions': 'Step A passed',
+                },
+                {
+                    'name': 'Step C',
+                    'action_description': 'Do C',
+                    'expected_outcome': 'C happens',
+                },
+            ],
+        }
+        response = self.client.post(
+            reverse('api:teststep-bulk-create'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data['created'], 3)
+        self.assertEqual(len(data['steps']), 3)
+
+        # Verify steps were created with correct order
+        steps = TestStep.objects.filter(plan=self.plan).order_by('order_index')
+        self.assertEqual(steps.count(), 3)
+        self.assertEqual(steps[0].name, 'Step A')
+        self.assertEqual(steps[1].name, 'Step B')
+        self.assertEqual(steps[2].name, 'Step C')
+
+    def test_bulk_create_auto_order_index(self):
+        # Create one step first
+        TestStep.objects.create(
+            plan=self.plan, name='Existing', order_index=5,
+            action_description='x', expected_outcome='x',
+        )
+        payload = {
+            'plan': self.plan.id,
+            'steps': [
+                {'name': 'A', 'action_description': 'a', 'expected_outcome': 'a'},
+                {'name': 'B', 'action_description': 'b', 'expected_outcome': 'b'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:teststep-bulk-create'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        # Should start at order_index 6 (after existing max of 5)
+        self.assertEqual(data['steps'][0]['order_index'], 6)
+        self.assertEqual(data['steps'][1]['order_index'], 7)
+
+    def test_bulk_create_with_explicit_order_index(self):
+        payload = {
+            'plan': self.plan.id,
+            'steps': [
+                {'name': 'A', 'action_description': 'a', 'expected_outcome': 'a', 'order_index': 10},
+                {'name': 'B', 'action_description': 'b', 'expected_outcome': 'b', 'order_index': 20},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:teststep-bulk-create'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        steps = TestStep.objects.filter(plan=self.plan).order_by('order_index')
+        self.assertEqual(steps[0].order_index, 10)
+        self.assertEqual(steps[1].order_index, 20)
+
+    def test_bulk_create_missing_required_field(self):
+        payload = {
+            'plan': self.plan.id,
+            'steps': [
+                {'name': 'Incomplete'},  # missing action_description and expected_outcome
+            ],
+        }
+        response = self.client.post(
+            reverse('api:teststep-bulk-create'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_create_invalid_plan(self):
+        payload = {
+            'plan': 99999,
+            'steps': [
+                {'name': 'A', 'action_description': 'a', 'expected_outcome': 'a'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:teststep-bulk-create'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_create_empty_steps(self):
+        payload = {
+            'plan': self.plan.id,
+            'steps': [],
+        }
+        response = self.client.post(
+            reverse('api:teststep-bulk-create'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_create_includes_all_fields(self):
+        payload = {
+            'plan': self.plan.id,
+            'steps': [
+                {
+                    'name': 'Full',
+                    'action_description': 'Full action',
+                    'expected_outcome': 'Full outcome',
+                    'preconditions': 'Precondition met',
+                    'active': False,
+                },
+            ],
+        }
+        response = self.client.post(
+            reverse('api:teststep-bulk-create'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        step_data = response.json()['steps'][0]
+        self.assertEqual(step_data['name'], 'Full')
+        self.assertEqual(step_data['preconditions'], 'Precondition met')
+        self.assertFalse(step_data['active'])
+        self.assertIn('id', step_data)
+        self.assertIn('created_at', step_data)
+
+
+class BulkLogStepResultsTest(TestCase):
+    """Tests for the bulk_log_step_results endpoint."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpass')
+        self.plan = TestPlan.objects.create(name='Plan', created_by=self.user)
+        self.step1 = TestStep.objects.create(
+            plan=self.plan, name='Step 1', order_index=0,
+            action_description='x', expected_outcome='x',
+        )
+        self.step2 = TestStep.objects.create(
+            plan=self.plan, name='Step 2', order_index=1,
+            action_description='x', expected_outcome='x',
+        )
+        self.step3 = TestStep.objects.create(
+            plan=self.plan, name='Step 3', order_index=2,
+            action_description='x', expected_outcome='x',
+        )
+        self.run = TestRun.objects.create(plan=self.plan)
+        self.client = Client()
+        self.client.login(username='testuser', password='testpass')
+
+    def test_bulk_log_results_success(self):
+        payload = {
+            'run': self.run.id,
+            'results': [
+                {'step': self.step1.id, 'status': 'passed', 'log_message': 'OK'},
+                {'step': self.step2.id, 'status': 'failed', 'log_message': 'Error'},
+                {'step': self.step3.id, 'status': 'skipped'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data['created'], 3)
+        self.assertEqual(len(data['skipped']), 0)
+        self.assertEqual(len(data['results']), 3)
+
+        # Verify in database
+        self.assertEqual(RunStepResult.objects.filter(run=self.run).count(), 3)
+
+    def test_bulk_log_skips_existing(self):
+        # Create one result first
+        RunStepResult.objects.create(
+            run=self.run, step=self.step1, status='passed',
+        )
+        payload = {
+            'run': self.run.id,
+            'results': [
+                {'step': self.step1.id, 'status': 'failed', 'log_message': 'Should be skipped'},
+                {'step': self.step2.id, 'status': 'passed'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data['created'], 1)
+        self.assertEqual(len(data['skipped']), 1)
+        self.assertEqual(data['skipped'][0]['reason'], 'Result already exists')
+
+        # Original result should be unchanged
+        result = RunStepResult.objects.get(run=self.run, step=self.step1)
+        self.assertEqual(result.status, 'passed')
+
+    def test_bulk_log_skips_missing_step(self):
+        payload = {
+            'run': self.run.id,
+            'results': [
+                {'step': 99999, 'status': 'passed'},  # non-existent step
+                {'step': self.step1.id, 'status': 'passed'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data['created'], 1)
+        self.assertEqual(len(data['skipped']), 1)
+        self.assertEqual(data['skipped'][0]['reason'], 'Step not found')
+
+    def test_bulk_log_invalid_status(self):
+        payload = {
+            'run': self.run.id,
+            'results': [
+                {'step': self.step1.id, 'status': 'invalid_status'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_log_missing_required_field(self):
+        payload = {
+            'run': self.run.id,
+            'results': [
+                {'step': self.step1.id},  # missing status
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_log_invalid_run(self):
+        payload = {
+            'run': 99999,
+            'results': [
+                {'step': self.step1.id, 'status': 'passed'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_log_empty_results(self):
+        payload = {
+            'run': self.run.id,
+            'results': [],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_bulk_log_includes_result_fields(self):
+        payload = {
+            'run': self.run.id,
+            'results': [
+                {'step': self.step1.id, 'status': 'passed', 'log_message': 'Detail log'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        result_data = response.json()['results'][0]
+        self.assertEqual(result_data['status'], 'passed')
+        self.assertEqual(result_data['log_message'], 'Detail log')
+        self.assertEqual(result_data['step_name'], 'Step 1')
+        self.assertIn('id', result_data)
+        self.assertIn('created_at', result_data)
+
+    def test_bulk_log_all_statuses(self):
+        payload = {
+            'run': self.run.id,
+            'results': [
+                {'step': self.step1.id, 'status': 'passed'},
+                {'step': self.step2.id, 'status': 'failed'},
+                {'step': self.step3.id, 'status': 'skipped'},
+            ],
+        }
+        response = self.client.post(
+            reverse('api:runstepresult-bulk-log'),
+            payload,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['created'], 3)
+
+

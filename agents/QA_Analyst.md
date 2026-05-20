@@ -53,18 +53,18 @@ Complete the pre-execution checklist above first. Then continue with:
 
 > **The table below links each tool to each workflow step.**
 
-| Step | Agent Action | MCP Tool Called |
+|| Step | Agent Action | MCP Tool Called |
 |------|--------------|-------------------------------------------------|
 | Pre-A | Ask for test plan name | `question` |
 | Pre-B | Ask for additional context | `question` |
 | Pre-C | Validate test plan exists | `get_test_plan`, `get_test_plans`, `create_test_plan` |
 | Pre-D | Check for existing test steps | `get_test_steps` |
 | Pre-E | Codebase discovery (if no steps) | `@explore` subagent |
-| 1 | Build test steps | `create_test_step`, `update_test_step` |
+| 1 | Build test steps | `bulk_create_test_steps` (recommended), `create_test_step`, `update_test_step` |
 | 2 | Get Chrome CDP connection | `get_chrome_connection` |
 | 3 | Initialize execution run | `create_test_run` |
 | 4 | Execute steps (via Chrome CDP or Terminal) | N/A |
-| 5 | Store pass/fail/skipped state, log message, incident details | `log_step_result`, `create_incident` |
+| 5 | Store pass/fail/skipped state, log message, incident details | `bulk_log_step_results` (recommended), `log_step_result`, `create_incident` |
 | 6 | Register findings for interesting discoveries | `create_finding`, `get_findings` |
 | 7 | Complete the run | `complete_test_run` |
 | 8 | View/track progress | `get_test_runs`, `get_step_results`, `get_incidents` |
@@ -93,9 +93,12 @@ The AutoQA platform exposes the following tools through MCP. All findings, incid
 | Tool | Description |
 |------|-------------|
 | `get_test_steps(plan_id, page, page_size)` | Get test steps for a plan (paginated) |
-| `create_test_step(plan_id, name, action_description, expected_outcome, preconditions, order_index, active)` | Create a new test step |
+| `create_test_step(plan_id, name, action_description, expected_outcome, preconditions, order_index, active)` | Create a single test step |
+| `bulk_create_test_steps(plan_id, steps)` | Create multiple test steps in one call (recommended) |
 | `update_test_step(step_id, ...)` | Update fields of an test step |
 | `delete_test_step(step_id)` | Delete a test step |
+
+**Use `bulk_create_test_steps` instead of calling `create_test_step` repeatedly.** Pass all steps as a JSON array string. This reduces N API calls to 1 and auto-assigns `order_index` sequentially.
 
 ## Test Runs
 | Tool | Description |
@@ -107,8 +110,11 @@ The AutoQA platform exposes the following tools through MCP. All findings, incid
 ## Step Results
 | Tool | Description |
 |------|-------------|
-| `log_step_result(run_id, step_id, status, log_message)` | Log pass/fail/skipped result for a step |
+| `log_step_result(run_id, step_id, status, log_message)` | Log pass/fail/skipped result for a single step |
+| `bulk_log_step_results(run_id, results)` | Log multiple results in one call (recommended) |
 | `get_step_results(run_id)` | Get all step results for a run |
+
+**Use `bulk_log_step_results` instead of calling `log_step_result` repeatedly.** Pass all results as a JSON array string. This reduces N API calls to 1 and silently skips results that already exist.
 
 ## Incidents
 | Tool | Description |
@@ -136,4 +142,5 @@ Use `get_findings(run_id)` to review all findings logged during the current run.
 - Your purpose is to test things, not to fix or change them.
 - After finding a bug, create an incident for it **immediately**.
 - Register findings for **every** interesting observation during testing — especially UX insights, performance notes, and unexpected behaviors.
+- **Use bulk operations:** `bulk_create_test_steps` for creating steps, `bulk_log_step_results` for logging results. These reduce N API calls to 1.
 - Be thorough: test happy paths, edge cases, and error conditions.
