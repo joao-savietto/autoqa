@@ -889,3 +889,140 @@ class BulkLogStepResultsTest(TestCase):
         self.assertEqual(response.json()['created'], 3)
 
 
+class SkipStepsTest(TestCase):
+    """Tests for POST /api/test-runs/{id}/skip-steps/."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpass')
+        self.plan = TestPlan.objects.create(name='Plan', created_by=self.user)
+        for i in range(12):
+            section = 'Alpha' if i < 6 else 'Beta'
+            TestStep.objects.create(
+                plan=self.plan, name=f'Step {i + 1}', order_index=i,
+                action_description='x', expected_outcome='x', section=section,
+            )
+        self.run = TestRun.objects.create(plan=self.plan, agent_id='skip-test')
+        self.client = Client()
+        self.client.login(username='testuser', password='testpass')
+
+    def _skip(self, payload):
+        return self.client.post(
+            reverse('api:testrun-skip-steps', args=[self.run.id]),
+            payload, content_type='application/json',
+        )
+
+    def test_skip_range_creates_skipped_results(self):
+        r = self._skip({'ranges': [[1, 6]]})
+        self.assertEqual(r.status_code, 201)
+        d = r.json()
+        self.assertEqual(d['skipped'], 6)
+        self.assertEqual(d['unchanged'], 0)
+        self.assertEqual(d['not_found_positions'], [])
+        self.assertEqual(RunStepResult.objects.filter(run=self.run, status='skipped').count(), 6)
+
+    def test_skip_is_idempotent(self):
+        self._skip({'ranges': [[1, 6]]})
+        d = self._skip({'ranges': [[1, 6]]}).json()
+        self.assertEqual(d['skipped'], 0)
+        self.assertEqual(d['unchanged'], 6)
+        self.assertEqual(RunStepResult.objects.filter(run=self.run, step__section='Alpha').count(), 6)
+
+    def test_skip_preserves_existing_results(self):
+        step7 = TestStep.objects.filter(plan=self.plan, order_index=6).first()
+        RunStepResult.objects.create(run=self.run, step=step7, status='passed')
+        d = self._skip({'ranges': [[7, 8]]}).json()
+        self.assertEqual(d['skipped'], 1)
+        self.assertEqual(d['unchanged'], 1)
+
+    def test_skip_out_of_range_reported_not_errored(self):
+        d = self._skip({'ranges': [[1, 15]]}).json()
+        self.assertEqual(d['not_found_positions'], [13, 14, 15])
+        self.assertEqual(d['skipped'], 12)
+
+    def test_skip_multiple_ranges(self):
+        d = self._skip({'ranges': [[1, 2], [11, 12]]}).json()
+        self.assertEqual(d['skipped'], 4)
+
+    def test_skip_exclude_section(self):
+        d = self._skip({'exclude_section': 'Alpha'}).json()
+        self.assertEqual(d['skipped'], 6)  # all Beta steps
+        self.assertFalse(RunStepResult.objects.filter(run=self.run, step__section='Alpha').exists())
+
+    def test_skip_validation_errors(self):
+        for payload in ({'ranges': [[5, 2]]}, {'ranges': []}, {}, {'ranges': [['a', 2]]}):
+            self.assertEqual(self._skip(payload).status_code, 400)
+
+    def test_skip_requires_auth(self):
+        self.client.logout()
+        r = self.client.post(reverse('api:testrun-skip-steps', args=[self.run.id]),
+                             {'ranges': [[1, 1]]}, content_type='application/json')
+        self.assertEqual(r.status_code, 403)
+
+
+class McpSectionTest(TestCase):
+    """The MCP layer must forward 'section' on step creation."""
+
+    def _call_create(self, **kwargs):
+        import mcp_server.server as m
+
+        captured = {}
+
+        class FakeResp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {'id': 1, 'section': 'Auth'}
+
+        class FakeClient:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, url, json=None):
+                captured['url'] = url
+                captured['json'] = json
+                return FakeResp()
+
+        original = m._client
+        m._client = lambda: FakeClient()
+        try:
+            m.create_test_step(**kwargs)
+        finally:
+            m._client = original
+
+        return captured
+
+    def test_create_test_step_forwards_section(self):
+        captured = self._call_create(
+            plan_id=1, name='S', action_description='a',
+            expected_outcome='b', section='Auth',
+        )
+        self.assertEqual(captured['url'], '/api/test-steps/')
+        self.assertEqual(captured['json']['section'], 'Auth')
+
+    def test_create_test_step_without_section_omits_it(self):
+        captured = self._call_create(
+            plan_id=1, name='S', action_description='a', expected_outcome='b',
+        )
+        self.assertNotIn('section', captured['json'])
+
+    def test_rest_single_create_persists_section(self):
+        self.user = User.objects.create_user(username='testuser', password='testpass')
+        self.plan = TestPlan.objects.create(name='Plan', created_by=self.user)
+        self.client.login(username='testuser', password='testpass')
+        r = self.client.post(
+            reverse('api:teststep-list'),
+            {'plan': self.plan.id, 'name': 'S', 'action_description': 'a',
+             'expected_outcome': 'b', 'section': 'Auth'},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()['section'], 'Auth')
+
+

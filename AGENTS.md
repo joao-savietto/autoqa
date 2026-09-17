@@ -17,7 +17,7 @@ Django 5.1 + DRF, SQLite, Tailwind CSS, HTMX, fastmcp MCP server, Selenium Chrom
 
 **Local dev:** `bash run_dev.sh` — creates venv, installs deps, generates `.env`, builds Tailwind, runs migrations. Then `python manage.py createsuperuser` + `python manage.py runserver` (port 8000).
 
-**Full stack Docker:** `docker compose up --build` (web:8234, mcp_server:3157, chrome:9222/4444/7900). Docker is self-contained — multi-stage Dockerfile builds Tailwind, entrypoint runs migrate + collectstatic.
+**Full stack Docker:** `docker compose up --build` (web:8234, mcp_server:3157, chrome:9222 host-loopback only). Docker is self-contained — multi-stage Dockerfile builds Tailwind, entrypoint runs migrate + collectstatic.
 
 ## Commands
 | Task | Command |
@@ -79,7 +79,7 @@ Content paths: `./templates/**/*.html`, `./core/**/*.py`. Rebuild after template
 ## Docker Services
 - **web** — Django + gunicorn on `:8234`. Entrypoint runs `migrate` + `collectstatic`, then gunicorn with `--reload`. `CHROME_HOST` overridden to `chrome` in compose.
 - **mcp_server** — FastMCP server on `:3157` (streamable-http). `MCP_API_URL` points to `http://web:8234`.
-- **chrome** — `selenium/standalone-chromium:latest` with CDP on `:9222`.
+- **chrome** — Custom image (`chrome/Dockerfile`): debian:bookworm-slim + pinned Chrome-for-Testing (`ARG CHROME_VERSION`), headless, non-root `chromeuser`. CDP stays on `127.0.0.1:9223` inside the container; socat bridges it to container port 9222. Bridge network, published to host **`127.0.0.1:9222` only** (no LAN exposure). `restart: unless-stopped` + `wget` healthcheck on 9222.
 
 For live CSS development, run `npm run watch:css` on the host in a separate terminal.
 

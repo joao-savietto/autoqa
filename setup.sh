@@ -108,10 +108,44 @@ else
     ok "Platform already has $USER_COUNT user(s). Skipping user creation."
 fi
 
-# ── 3. Create an API key ──────────────────────────────────────────────────────
-info "Creating API key for the QA agent..."
+# ── 3. Check if autoqa is already registered in OpenCode with a valid API key ─
+API_KEY=""
+KEY_VALID=false
 
-API_KEY_OUTPUT=$(run_django_py "
+if [ -f "$CONFIG_FILE" ]; then
+    info "Checking OpenCode config for existing AutoQA registration..."
+
+    # Extract the existing X-API-Key value for autoqa from opencode.json
+    EXISTING_KEY=$(python3 -c "
+import json, sys
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+mcp = config.get('mcp', {})
+autoqa = mcp.get('autoqa', {})
+key = autoqa.get('headers', {}).get('X-API-Key', '')
+print(key)
+" 2>/dev/null || echo "")
+
+    if [ -n "$EXISTING_KEY" ] && [ "$EXISTING_KEY" != "None" ]; then
+        info "Found existing API key in config. Validating..."
+        # Validate the key against Django API
+        if curl -sf -H "X-API-Key: $EXISTING_KEY" "$API_BASE/api/test-plans/" >/dev/null 2>&1; then
+            API_KEY="$EXISTING_KEY"
+            KEY_VALID=true
+            ok "Existing API key is valid. Reusing it."
+        else
+            warn "Existing API key is invalid or expired. Generating a new one..."
+        fi
+    else
+        warn "No existing AutoQA registration found in OpenCode config. Proceeding with fresh setup."
+    fi
+fi
+
+# ── 3b. Create an API key if none valid exists ────────────────────────────────
+if [ "$KEY_VALID" = false ]; then
+    info "Creating API key for the QA agent..."
+
+    API_KEY_OUTPUT=$(run_django_py "
 from rest_framework_api_key.models import APIKey
 import uuid
 prefix = 'autoqa-' + uuid.uuid4().hex[:8]
@@ -119,16 +153,17 @@ instance, raw = APIKey.objects.create_key(name='autoqa-agent', prefix=prefix)
 print(raw)
 ")
 
-API_KEY=$(echo "$API_KEY_OUTPUT" | head -1 | tr -d '[:space:]')
-[ -z "$API_KEY" ] && fail "Failed to extract API key from output."
+    API_KEY=$(echo "$API_KEY_OUTPUT" | head -1 | tr -d '[:space:]')
+    [ -z "$API_KEY" ] && fail "Failed to extract API key from output."
 
-echo ""
-echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  API KEY (save this — it's shown only once):${NC}"
-echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
-echo ""
-echo -e "  ${GREEN}${BOLD}${API_KEY}${NC}"
-echo ""
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}  API KEY (save this — it's shown only once):${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${GREEN}${BOLD}${API_KEY}${NC}"
+    echo ""
+fi
 
 # ── 4. Copy agent file to OpenCode config ─────────────────────────────────────
 if [ ! -f "$AGENT_FILE" ]; then
@@ -185,9 +220,12 @@ else
 fi
 
 # ── 5. Register MCP servers in OpenCode config ────────────────────────────────
-info "Updating OpenCode config at $CONFIG_FILE..."
+if [ "$KEY_VALID" = true ]; then
+    info "AutoQA already registered in OpenCode with valid key. Skipping MCP registration."
+else
+    info "Updating OpenCode config at $CONFIG_FILE..."
 
-python3 - "$CONFIG_FILE" "$API_KEY" <<'PYEOF'
+    python3 - "$CONFIG_FILE" "$API_KEY" <<'PYEOF'
 import json, sys, os
 from datetime import datetime
 
@@ -232,7 +270,8 @@ with open(config_path, 'w') as f:
     f.write('\n')
 PYEOF
 
-ok "MCP server registered in $CONFIG_FILE"
+    ok "MCP server registered in $CONFIG_FILE"
+fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""

@@ -14,8 +14,9 @@ from rest_framework_api_key.models import APIKey
 
 
 class TestStepPagination(pagination.PageNumberPagination):
-    page_size = 5
+    page_size = 50
     page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 class TestPlanViewSet(viewsets.ModelViewSet):
@@ -70,7 +71,53 @@ class TestStepViewSet(viewsets.ModelViewSet):
         if keyword:
             from django.db.models import Q
             qs = qs.filter(Q(name__icontains=keyword) | Q(action_description__icontains=keyword))
+        section = self.request.query_params.get('section')
+        if section:
+            qs = qs.filter(section=section)
         return qs
+
+    @action(detail=False, methods=['get'])
+    def pending_steps(self, request):
+        """Return steps that have NOT yet been executed for a given run.
+
+        Query params:
+            plan: The plan ID
+            run: The run ID
+
+        Returns unpaginated list of test steps with no RunStepResult for
+        this run. Use this to find remaining work without paginating through
+        all steps and results separately.
+        """
+        plan_id = request.query_params.get('plan') or request.data.get('plan')
+        run_id = request.query_params.get('run') or request.data.get('run')
+
+        if not plan_id:
+            return Response(
+                {'error': "'plan' query parameter is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        steps = TestStep.objects.filter(plan_id=plan_id, active=True)
+
+        if run_id:
+            try:
+                run = TestRun.objects.get(id=run_id)
+            except TestRun.DoesNotExist:
+                return Response(
+                    {'error': f"TestRun with id {run_id} not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            completed_step_ids = RunStepResult.objects.filter(
+                run=run
+            ).values_list('step_id', flat=True)
+            steps = steps.exclude(id__in=completed_step_ids)
+
+        steps = steps.order_by('order_index')
+        serializer = TestStepSerializer(steps, many=True)
+        return Response({
+            'total': steps.count(),
+            'steps': serializer.data,
+        })
 
     @action(detail=False, methods=['post'])
     def reorder(self, request):
@@ -88,8 +135,8 @@ class TestStepViewSet(viewsets.ModelViewSet):
                 TestStep.objects.filter(id=step_id).update(order_index=order_index)
         return Response({'reordered': len(steps_data)})
 
-    @action(detail=False, methods=['post'])
-    def bulk_create(self, request):
+    @action(detail=False, methods=['post'], url_path='bulk-create', url_name='bulk-create')
+    def bulk_create_steps(self, request):
         """Create multiple test steps for a plan in a single request.
 
         Payload:
@@ -131,6 +178,51 @@ class TestRunViewSet(viewsets.ModelViewSet):
     ordering_fields = ['started_at', 'completed_at']
     ordering = ['-started_at']
 
+    @action(detail=True, methods=['get'])
+    def progress(self, request, pk=None):
+        """Return execution progress for a test run.
+
+        Single-call alternative to paginating through all step results.
+        Returns compact summary: total steps, counts by status, and list
+        of pending step IDs.
+        """
+        run = self.get_object()
+        plan = run.plan
+
+        total_steps = plan.teststeps.filter(active=True).count()
+        results = RunStepResult.objects.filter(run=run)
+
+        passed = results.filter(status='passed').count()
+        failed = results.filter(status='failed').count()
+        skipped = results.filter(status='skipped').count()
+        executed = passed + failed + skipped
+        pending = total_steps - executed
+
+        executed_step_ids = set(results.values_list('step_id', flat=True))
+        all_step_ids = set(plan.teststeps.filter(active=True).values_list('id', flat=True))
+        pending_step_ids = sorted(all_step_ids - executed_step_ids)
+
+        sections = list(
+            plan.teststeps.filter(active=True)
+            .exclude(section='')
+            .values_list('section', flat=True)
+            .distinct()
+            .order_by('section')
+        )
+
+        return Response({
+            'run_id': run.id,
+            'status': run.status,
+            'total_steps': total_steps,
+            'executed': executed,
+            'passed': passed,
+            'failed': failed,
+            'skipped': skipped,
+            'pending': pending,
+            'pending_step_ids': pending_step_ids,
+            'sections': sections,
+        })
+
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         """Mark a run as completed or failed."""
@@ -147,6 +239,91 @@ class TestRunViewSet(viewsets.ModelViewSet):
         run.completed_at = timezone.now()
         run.save(update_fields=['status', 'completed_at'])
         return Response(TestRunSerializer(run).data)
+
+    @action(detail=True, methods=['post'], url_path='skip-steps', url_name='skip-steps')
+    def skip_steps(self, request, pk=None):
+        """Skip a set of steps for this run in one call.
+
+        Payload:
+            {
+                "ranges": [[1, 100]],          (optional) 1-based INCLUSIVE positions
+                                                over the plan's active steps ordered
+                                                by order_index.
+                "exclude_section": "Alpha",    (optional) skip every active step
+                                                whose section is NOT this value.
+                "log_message": "..."           (optional)
+            }
+        At least one of ranges / exclude_section is required.
+        Returns {skipped, unchanged, not_found_positions, total_targeted}.
+        """
+        run = self.get_object()
+        ranges = request.data.get('ranges')
+        exclude_section = request.data.get('exclude_section')
+        log_message = request.data.get('log_message') or ''
+
+        if not ranges and not exclude_section:
+            return Response(
+                {'error': "Provide 'ranges' and/or 'exclude_section'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        steps = list(run.plan.teststeps.filter(active=True).order_by('order_index', 'id'))
+
+        positions = []
+        if ranges is not None:
+            if not isinstance(ranges, list) or len(ranges) == 0:
+                return Response(
+                    {'error': "'ranges' must be a non-empty list of [start, end] pairs."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            positions = []
+            for rng in ranges:
+                if (not isinstance(rng, list) or len(rng) != 2
+                        or not all(isinstance(v, int) and not isinstance(v, bool) for v in rng)):
+                    return Response(
+                        {'error': f"Each range must be a [start, end] pair of integers, got {rng!r}."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                start, end = rng
+                if start < 1 or start > end:
+                    return Response(
+                        {'error': f"Invalid range [{start}, {end}]: need 1 <= start <= end."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                positions.extend(range(start, end + 1))
+
+        if exclude_section:
+            outside = [i + 1 for i, s in enumerate(steps) if s.section != exclude_section]
+            for pos in outside:
+                if pos not in positions:
+                    positions.append(pos)
+
+        positions = sorted(set(positions))
+        existing = set(RunStepResult.objects.filter(run=run).values_list('step_id', flat=True))
+        skipped = unchanged = 0
+        not_found = []
+        for pos in positions:
+            if pos < 1 or pos > len(steps):
+                not_found.append(pos)
+                continue
+            step = steps[pos - 1]
+            if step.id in existing:
+                unchanged += 1
+                continue
+            default_msg = log_message or f"Skipped via skip-steps (position {pos})"
+            RunStepResult.objects.create(run=run, step=step, status='skipped', log_message=default_msg)
+            existing.add(step.id)
+            skipped += 1
+
+        return Response(
+            {
+                'skipped': skipped,
+                'unchanged': unchanged,
+                'not_found_positions': sorted(set(not_found)),
+                'total_targeted': len(set(positions)),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class RunStepResultViewSet(viewsets.ModelViewSet):
@@ -165,7 +342,7 @@ class RunStepResultViewSet(viewsets.ModelViewSet):
             qs = qs.filter(run_id=run_id)
         return qs
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], url_path='bulk-log', url_name='bulk-log')
     def bulk_log(self, request):
         """Log multiple step results for a run in a single request.
 

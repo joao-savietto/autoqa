@@ -53,7 +53,7 @@
         <button onclick="switchTab('steps')" id="tabSteps"
                 class="tab-btn border-accent-500 text-accent-400 whitespace-nowrap py-3.5 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors">
             <i class="fa-solid fa-list-check text-xs"></i>
-            Test Steps <span class="badge badge-blue ml-1">{{ steps.count }}</span>
+            Test Steps <span class="badge badge-blue ml-1" id="stepCount">{{ plan.total_steps }}</span>
         </button>
         {% endif %}
         <button onclick="switchTab('runs')" id="tabRuns"
@@ -66,56 +66,39 @@
 
 <!-- Tab Content: Steps -->
 <div id="panelSteps" class="tab-panel {% if plan.plan_type == 'security' %}hidden{% endif %}">
-    {% if steps %}
-    <div class="card overflow-hidden">
-        <table class="table-dark">
-            <thead>
-                <tr>
-                    <th class="w-16">#</th>
-                    <th>Name</th>
-                    <th>Action</th>
-                    <th>Expected Outcome</th>
-                    <th class="w-28">Status</th>
-                    <th class="w-36 text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for step in steps %}
-                <tr>
-                    <td class="text-gray-500 font-mono text-xs">{{ step.order_index }}</td>
-                    <td class="font-medium text-white">{{ step.name }}</td>
-                    <td class="text-gray-400 max-w-xs truncate">{{ step.action_description }}</td>
-                    <td class="text-gray-400 max-w-xs truncate">{{ step.expected_outcome }}</td>
-                    <td>
-                        <span class="badge {% if step.active %}badge-green{% else %}badge-gray{% endif %}">
-                            <i class="fa-solid {% if step.active %}fa-circle-check{% else %}fa-circle-xmark{% endif %} mr-1.5 text-[10px]"></i>
-                            {{ step.active|yesno:"Active,Inactive" }}
-                        </span>
-                    </td>
-                    <td class="text-right">
-                        <a href="{% url 'step_edit' step.id %}" class="text-gray-400 hover:text-accent-400 mr-3 transition-colors" title="Edit">
-                            <i class="fa-regular fa-pen-to-square"></i>
-                        </a>
-                        <button onclick="confirmDeleteStep({{ step.id }}, '{{ step.name }}')"
-                                class="text-gray-400 hover:text-red-400 transition-colors" title="Delete">
-                            <i class="fa-regular fa-trash-can"></i>
-                        </button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="text-center py-16 card">
-        <div class="flex flex-col items-center">
-            <div class="w-14 h-14 rounded-full bg-dark-600 flex items-center justify-center mb-4">
-                <i class="fa-solid fa-list-check text-2xl text-gray-500"></i>
-            </div>
-            <p class="text-gray-400">No test steps yet. Add your first step to get started.</p>
+    {% if sections %}
+    <div class="flex items-center gap-2 mb-4">
+        <label class="text-sm text-gray-400 flex items-center gap-1.5">
+            <i class="fa-solid fa-filter text-xs text-gray-500"></i>
+            Section:
+        </label>
+        <div class="flex gap-1 flex-wrap">
+            <button class="px-3 py-1 text-xs rounded-lg transition-colors {% if not current_section %}bg-accent-600 text-white{% else %}bg-dark-600 text-gray-400 hover:text-white{% endif %}"
+                    hx-get="{% url 'plan_steps_page' plan.id %}?page=1"
+                    hx-target="#steps-container" hx-swap="outerHTML">
+                All
+            </button>
+            {% for sec in sections %}
+            <button class="px-3 py-1 text-xs rounded-lg transition-colors {% if current_section == sec %}bg-accent-600 text-white{% else %}bg-dark-600 text-gray-400 hover:text-white{% endif %}"
+                    hx-get="{% url 'plan_steps_page' plan.id %}?page=1&section={{ sec|urlencode }}"
+                    hx-target="#steps-container" hx-swap="outerHTML">
+                {{ sec }}
+            </button>
+            {% endfor %}
         </div>
     </div>
     {% endif %}
+
+    <div hx-get="{% url 'plan_steps_page' plan.id %}?page=1{% if current_section %}&section={{ current_section }}{% endif %}"
+         hx-trigger="load"
+         hx-swap="outerHTML">
+        <div class="text-center py-16 card">
+            <div class="animate-pulse flex flex-col items-center">
+                <i class="fa-solid fa-spinner fa-spin text-2xl text-gray-500 mb-3"></i>
+                <p class="text-gray-400">Loading steps...</p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Tab Content: Runs -->
@@ -203,6 +186,12 @@
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-300 mb-1.5">
+                    <i class="fa-solid fa-layer-group text-xs text-gray-500 mr-1"></i>Section
+                </label>
+                <input type="text" name="section" class="input-dark" placeholder="e.g. Authentication, Dashboard">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1.5">
                     <i class="fa-solid fa-hand-pointer text-xs text-gray-500 mr-1"></i>Action Description <span class="text-red-400">*</span>
                 </label>
                 <textarea name="action_description" rows="2" required class="input-dark resize-none"></textarea>
@@ -223,7 +212,7 @@
                 <label class="block text-sm font-medium text-gray-300 mb-1.5">
                     <i class="fa-solid fa-sort text-xs text-gray-500 mr-1"></i>Order Index
                 </label>
-                <input type="number" name="order_index" value="{{ steps.count }}" min="0" class="input-dark">
+                <input type="number" name="order_index" value="{{ plan.total_steps }}" min="0" class="input-dark">
             </div>
         </form>
         <div class="px-6 py-4 bg-dark-800/50 rounded-b-xl flex justify-end space-x-3 border-t border-dark-500">
@@ -301,7 +290,14 @@ function createStep() {
     })
     .then(res => {
         if (res.ok) {
-            location.reload();
+            document.getElementById('newStepModal').classList.add('hidden');
+            // Reload the steps container via HTMX
+            const container = document.getElementById('steps-container') || document.querySelector('#panelSteps > [hx-get]');
+            if (container) {
+                htmx.trigger(container, 'htmx:load');
+            } else {
+                location.reload();
+            }
         } else {
             res.json().then(json => alert('Failed to create step: ' + JSON.stringify(json)));
         }

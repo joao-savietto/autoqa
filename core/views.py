@@ -5,6 +5,8 @@ from django.contrib.auth.models import User
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from django.utils.timezone import localtime, now as tz_now
+from django.core.paginator import Paginator
+
 import environ
 from datetime import datetime
 
@@ -67,10 +69,41 @@ def dashboard(request):
 @login_required
 def plan_detail(request, plan_id):
     plan = get_object_or_404(TestPlan, id=plan_id)
-    steps = plan.teststeps.filter(active=True).order_by('order_index')
+    steps_qs = plan.teststeps.filter(active=True).order_by('order_index')
+    section = request.GET.get('section', '')
+    if section:
+        steps_qs = steps_qs.filter(section=section)
+
+    paginator = Paginator(steps_qs, 20)
+    page_number = request.GET.get('page', 1)
+    steps = paginator.get_page(page_number)
+
+    sections = plan.teststeps.filter(active=True).exclude(section='').values_list(
+        'section', flat=True
+    ).distinct().order_by('section')
+
     runs = plan.testruns.order_by('-started_at')[:20]
     return render(request, 'plan_detail.html', {
-        'plan': plan, 'steps': steps, 'runs': runs,
+        'plan': plan, 'steps': steps, 'runs': runs, 'sections': sections,
+        'current_section': section,
+    })
+
+
+@login_required
+def plan_detail_steps(request, plan_id):
+    """HTMX endpoint: returns a page of test steps as a partial."""
+    plan = get_object_or_404(TestPlan, id=plan_id)
+    steps_qs = plan.teststeps.filter(active=True).order_by('order_index')
+    section = request.GET.get('section', '')
+    if section:
+        steps_qs = steps_qs.filter(section=section)
+
+    paginator = Paginator(steps_qs, 20)
+    page_number = request.GET.get('page', 1)
+    steps = paginator.get_page(page_number)
+
+    return render(request, 'partials/steps_table.html', {
+        'plan': plan, 'steps': steps,
     })
 
 

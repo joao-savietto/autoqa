@@ -16,6 +16,7 @@ urlpatterns = [
     path('logout/', web_views.logout_view, name='logout'),
     path('dashboard/', web_views.dashboard, name='dashboard'),
     path('plan/<int:plan_id>/', web_views.plan_detail, name='plan_detail'),
+    path('plan/<int:plan_id>/steps/', web_views.plan_detail_steps, name='plan_steps_page'),
     path('run/<int:run_id>/', web_views.run_detail, name='run_detail'),
     path('step/<int:step_id>/edit/', web_views.step_edit, name='step_edit'),
     path('step/<int:step_id>/delete/', web_views.step_delete, name='step_delete'),

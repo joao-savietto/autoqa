@@ -12,7 +12,7 @@ Docker:
     docker compose up --build mcp_server
 
 Environment variables:
-    MCP_API_URL: URL of the Django REST API (default: http://web:8000)
+    MCP_API_URL: URL of the Django REST API (default: http://localhost:8234)
 """
 
 import json
@@ -31,7 +31,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 
 from fastmcp import FastMCP
 
-API_URL = os.environ.get("MCP_API_URL", "http://web:8000")
+API_URL = os.environ.get("MCP_API_URL", "http://localhost:8234")
 
 # ContextVar to hold the API key from the current HTTP request
 _current_api_key: ContextVar[str | None] = ContextVar("current_api_key", default=None)
@@ -215,14 +215,17 @@ def delete_test_plan(plan_id: int) -> str:
 
 
 @mcp.tool()
-def get_test_steps(plan_id: int, page: int = None, page_size: int = None, keyword: str = "") -> str:
+def get_test_steps(
+    plan_id: int, page: int = None, page_size: int = None, keyword: str = "", section: str = ""
+) -> str:
     """Get test steps for a test plan with pagination support.
 
     Args:
         plan_id: The ID of the test plan
         page: Page number (default: 1)
-        page_size: Number of items per page (default: 5)
+        page_size: Number of items per page (default: 50, max: 100)
         keyword: Search keyword matching name or action_description (OR logic)
+        section: Filter steps by section/category (e.g. "Authentication", "Dashboard")
 
     Returns:
         JSON string with paginated list of test steps
@@ -234,6 +237,8 @@ def get_test_steps(plan_id: int, page: int = None, page_size: int = None, keywor
         params["page_size"] = page_size
     if keyword:
         params["keyword"] = keyword
+    if section:
+        params["section"] = section
     with _client() as client:
         resp = client.get("/api/test-steps/", params=params)
         resp.raise_for_status()
@@ -247,7 +252,8 @@ def create_test_step(
     action_description: str,
     expected_outcome: str,
     preconditions: str = "",
-    order_index: int = 0,
+    section: str = "",
+    order_index: int = -1,
     active: bool = True,
 ) -> str:
     """Create a new test step within a test plan.
@@ -258,24 +264,29 @@ def create_test_step(
         action_description: What action to perform
         expected_outcome: What should happen after this step
         preconditions: Conditions that must be met before executing
-        order_index: Position in the step sequence
+        section: Grouping category (e.g. "Authentication", "Dashboard")
+        order_index: Position in the step sequence (default: auto-assigned)
         active: Whether this step is active
 
     Returns:
         JSON string with the created test step data
     """
+    data = {
+        "plan": plan_id,
+        "name": name,
+        "action_description": action_description,
+        "expected_outcome": expected_outcome,
+        "preconditions": preconditions,
+        "active": active,
+    }
+    if section:
+        data["section"] = section
+    if order_index >= 0:
+        data["order_index"] = order_index
     with _client() as client:
         resp = client.post(
             "/api/test-steps/",
-            json={
-                "plan": plan_id,
-                "name": name,
-                "action_description": action_description,
-                "expected_outcome": expected_outcome,
-                "preconditions": preconditions,
-                "order_index": order_index,
-                "active": active,
-            },
+            json=data,
         )
         resp.raise_for_status()
         return json.dumps(resp.json())
@@ -297,6 +308,7 @@ def bulk_create_test_steps(
             - action_description (required): What action to perform
             - expected_outcome (required): What should happen after this step
             - preconditions (optional): Conditions before executing
+            - section (optional): Grouping category (e.g. "Authentication", "Dashboard")
             - order_index (optional): Position in sequence (auto-assigned if omitted)
             - active (optional, default true): Whether this step is active
 
@@ -336,6 +348,7 @@ def update_test_step(
     preconditions: str = None,
     order_index: int = None,
     active: bool = None,
+    section: str = None,
 ) -> str:
     """Update a test step. Only provided fields will be updated.
 
@@ -347,6 +360,7 @@ def update_test_step(
         preconditions: New preconditions
         order_index: New position in sequence
         active: Whether this step is active
+        section: Grouping category for the step
 
     Returns:
         JSON string with the updated test step data
@@ -364,6 +378,8 @@ def update_test_step(
         data["order_index"] = order_index
     if active is not None:
         data["active"] = active
+    if section is not None:
+        data["section"] = section
 
     with _client() as client:
         resp = client.patch(f"/api/test-steps/{step_id}/", json=data)
@@ -387,16 +403,65 @@ def delete_test_step(step_id: int) -> str:
         return json.dumps({"status": "deleted", "step_id": step_id})
 
 
+@mcp.tool()
+def get_pending_steps(plan_id: int, run_id: int = None) -> str:
+    """Get test steps that have NOT yet been executed for a run.
+
+    Returns all active steps that don't have a RunStepResult in the given run.
+    If run_id is omitted, returns all active steps for the plan.
+    Much more efficient than paginating through all steps and results separately.
+
+    Args:
+        plan_id: The ID of the test plan
+        run_id: The ID of the test run (optional — if omitted returns all active steps)
+
+    Returns:
+        JSON string with count and list of pending/remaining step objects
+    """
+    params = {"plan": plan_id, "run": run_id} if run_id else {"plan": plan_id}
+    with _client() as client:
+        resp = client.get("/api/test-steps/pending_steps/", params=params)
+        resp.raise_for_status()
+        return json.dumps(resp.json())
+
+
+@mcp.tool()
+def categorize_test_step(step_id: int, section: str) -> str:
+    """Assign a section/category to a test step for organization.
+
+    Use sections like "Authentication", "Dashboard", "Reports", "API Endpoints",
+    "Error Handling" to group steps in large test plans (100+ steps).
+
+    Args:
+        step_id: The ID of the test step
+        section: Section name to assign
+
+    Returns:
+        JSON string with the updated test step data
+    """
+    with _client() as client:
+        resp = client.patch(
+            f"/api/test-steps/{step_id}/",
+            json={"section": section},
+        )
+        resp.raise_for_status()
+        return json.dumps(resp.json())
+
+
 # ─── Test Runs ────────────────────────────────────────────────────────────────
 
 
 @mcp.tool()
-def create_test_run(plan_id: int, agent_id: str = "") -> str:
+def create_test_run(plan_id: int, agent_id: str = "", section: str = "") -> str:
     """Create a new test run for a test plan.
+
+    For large plans (100+ steps), use the section parameter to scope the run
+    to a specific section. Multiple agents can run different sections in parallel.
 
     Args:
         plan_id: The ID of the test plan
         agent_id: Identifier of the agent executing this run
+        section: Optional section scope — agents should note this in agent_id
 
     Returns:
         JSON string with the created test run data
@@ -406,7 +471,7 @@ def create_test_run(plan_id: int, agent_id: str = "") -> str:
             "/api/test-runs/",
             json={
                 "plan": plan_id,
-                "agent_id": agent_id,
+                "agent_id": f"{agent_id} [{section}]" if section else agent_id,
             },
         )
         resp.raise_for_status()
@@ -452,6 +517,26 @@ def complete_test_run(run_id: int, status: str = "completed") -> str:
             f"/api/test-runs/{run_id}/complete/",
             json={"status": status},
         )
+        resp.raise_for_status()
+        return json.dumps(resp.json())
+
+
+@mcp.tool()
+def get_run_progress(run_id: int) -> str:
+    """Get execution progress summary for a test run.
+
+    Single-call alternative to manually paginating through step results.
+    Returns counts (total, passed, failed, skipped, pending), the IDs
+    of pending steps, and available sections.
+
+    Args:
+        run_id: The ID of the test run
+
+    Returns:
+        JSON string with progress summary
+    """
+    with _client() as client:
+        resp = client.get(f"/api/test-runs/{run_id}/progress/")
         resp.raise_for_status()
         return json.dumps(resp.json())
 
@@ -655,7 +740,9 @@ def create_finding(
     """
     if category not in ("info", "suggestion", "recommendation", "critical"):
         return json.dumps(
-            {"error": f"Invalid category '{category}'. Must be info, suggestion, recommendation, or critical."}
+            {
+                "error": f"Invalid category '{category}'. Must be info, suggestion, recommendation, or critical."
+            }
         )
 
     with _client() as client:

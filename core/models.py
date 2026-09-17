@@ -48,6 +48,13 @@ class TestStep(models.Model):
 
     plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name='teststeps')
     name = models.CharField(max_length=255)
+    section = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text='Grouping category for organizing large test plans (e.g. Authentication, Dashboard, Reports)',
+    )
     action_description = models.TextField(help_text='What action to perform')
     preconditions = models.TextField(
         blank=True,

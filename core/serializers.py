@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Max
 from .models import TestPlan, TestStep, TestRun, RunStepResult, Incident, Finding
 
 
@@ -6,16 +7,28 @@ class TestStepSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestStep
         fields = [
-            'id', 'plan', 'name', 'action_description', 'preconditions',
+            'id', 'plan', 'section', 'name', 'action_description', 'preconditions',
             'expected_outcome', 'order_index', 'active', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate(self, data):
-        plan_id = self.initial_data.get('plan') or getattr(self.instance, 'plan', None)
+        plan_id = self.initial_data.get('plan') or (
+            self.instance.plan_id if self.instance else None
+        )
         if not plan_id:
             raise serializers.ValidationError("'plan' is required.")
         return data
+
+    def create(self, validated_data):
+        if 'order_index' not in validated_data:
+            plan = validated_data.get('plan')
+            if plan:
+                max_order = TestStep.objects.filter(plan=plan).aggregate(
+                    max_order=Max('order_index')
+                )['max_order']
+                validated_data['order_index'] = (max_order or -1) + 1
+        return super().create(validated_data)
 
 
 class TestStepBulkSerializer(serializers.Serializer):
@@ -52,10 +65,9 @@ class TestStepBulkSerializer(serializers.Serializer):
         except TestPlan.DoesNotExist:
             raise serializers.ValidationError(f"TestPlan with id {plan_id} not found.")
 
-        # Calculate starting order_index
         max_order = TestStep.objects.filter(plan=plan).aggregate(
-            db_models.Max('order_index')
-        )['order_index__max']
+            max_order=Max('order_index')
+        )['max_order']
         if max_order is None:
             max_order = -1
 
@@ -69,6 +81,7 @@ class TestStepBulkSerializer(serializers.Serializer):
                     action_description=step['action_description'],
                     expected_outcome=step['expected_outcome'],
                     preconditions=step.get('preconditions', ''),
+                    section=step.get('section', ''),
                     order_index=order_index,
                     active=step.get('active', True),
                 )
@@ -78,12 +91,11 @@ class TestStepBulkSerializer(serializers.Serializer):
         return {'created': len(created), 'steps': created}
 
 
-from django.db import models as db_models
-
 
 class TestPlanSerializer(serializers.ModelSerializer):
     total_steps = serializers.ReadOnlyField()
     latest_run = serializers.SerializerMethodField()
+    sections = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(
         source='created_by.get_full_name', read_only=True, default=''
     )
@@ -92,7 +104,7 @@ class TestPlanSerializer(serializers.ModelSerializer):
         model = TestPlan
         fields = [
             'id', 'name', 'project_name', 'plan_type', 'test_scope', 'exclude_scope',
-            'created_by', 'created_by_name', 'total_steps', 'latest_run',
+            'created_by', 'created_by_name', 'total_steps', 'latest_run', 'sections',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
@@ -108,6 +120,14 @@ class TestPlanSerializer(serializers.ModelSerializer):
                 'failed_steps': run.failed_steps,
             }
         return None
+
+    def get_sections(self, obj):
+        return list(
+            obj.teststeps.filter(active=True, section__gt='')
+            .values_list('section', flat=True)
+            .distinct()
+            .order_by('section')
+        )
 
     def create(self, validated_data):
         user = self.context['request'].user

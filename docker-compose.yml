@@ -32,8 +32,15 @@ services:
   chrome:
     build: ./chrome
     ports:
-      - "9222:9222"
+      - "127.0.0.1:9222:9222"
     shm_size: "2gb"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9222/json/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   kali:
     build: ./kali

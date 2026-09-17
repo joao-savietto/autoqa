@@ -38,6 +38,7 @@ static/css/output.css
 # Logs
 *.log
 scope.md
+.pi/
 
 # MemPalace per-project files (issue #185)
 mempalace.yaml
