@@ -43,3 +43,7 @@ scope.md
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# internal agent notes (moved to ~/dev_notes)
+AGENTS.md
+MEMORY.md
