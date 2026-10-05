@@ -217,6 +217,8 @@ def _status_font(status):
         return Font(name="Segoe UI", size=10, bold=True, color="DC2626")
     elif status_lower == "skipped":
         return Font(name="Segoe UI", size=10, color="6B7280")
+    elif status_lower == "blocked":
+        return Font(name="Segoe UI", size=10, bold=True, color="D97706")
     elif status_lower in ("completed", "active"):
         return Font(name="Segoe UI", size=10, bold=True, color="059669")
     elif status_lower == "running":
@@ -345,9 +347,9 @@ def export_run_results_xlsx(request, run_id):
     stats_fill = PatternFill(start_color="EEF2FF", end_color="EEF2FF", fill_type="solid")
     stats_font = Font(name="Segoe UI", size=10, bold=True, color="334155")
     stats_border = Border(bottom=Side(style="medium", color="6366F1"))
-    stats_labels = ["Total", "Passed", "Failed", "Skipped", "Pending"]
-    stats_values = [run.total_steps, run.passed_steps, run.failed_steps, run.skipped_steps, run.pending_steps]
-    stats_colors = ["334155", "059669", "DC2626", "6B7280", "D97706"]
+    stats_labels = ["Total", "Passed", "Failed", "Skipped", "Blocked", "Pending"]
+    stats_values = [run.total_steps, run.passed_steps, run.failed_steps, run.skipped_steps, run.blocked_steps, run.pending_steps]
+    stats_colors = ["334155", "059669", "DC2626", "6B7280", "D97706", "D97706"]
     for i, (label, val, color) in enumerate(zip(stats_labels, stats_values, stats_colors), 1):
         lbl_cell = ws.cell(row=stats_row, column=i, value=label)
         lbl_cell.font = Font(name="Segoe UI", size=9, bold=True, color="64748B")
@@ -480,23 +482,27 @@ def export_run_results_xlsx(request, run_id):
         ws5.sheet_properties.tabColor = "D97706"
         _title_row(ws5, 1, f"Findings — Run #{run.id}", f"Total: {len(findings)} findings")
         header_row = 3
-        headers = ["#", "Title", "Category", "Description", "Created"]
+        headers = ["#", "Title", "Category", "Description", "Related Steps", "Created"]
         _styled_header(ws5, headers)
         ws5.row_dimensions[header_row].height = 30
         for row_idx, finding in enumerate(findings, header_row + 1):
             is_alt = (row_idx - header_row) % 2 == 0
+            related_steps = ", ".join(
+                f"#{s.id} {s.name}" for s in finding.step_ids.all()
+            ) or "-"
             values = [
                 finding.id,
                 finding.title,
                 finding.get_category_display(),
                 finding.description,
+                related_steps,
                 localtime(finding.created_at).strftime("%Y-%m-%d %H:%M"),
             ]
             _styled_row(ws5, row_idx, values, is_alt)
             ws5.cell(row=row_idx, column=3).font = _category_font(finding.category)
             ws5.cell(row=row_idx, column=3).alignment = Alignment(horizontal="center", vertical="center")
             ws5.cell(row=row_idx, column=1).alignment = Alignment(horizontal="center", vertical="center")
-        find_widths = [6, 30, 16, 55, 16]
+        find_widths = [6, 30, 16, 55, 30, 16]
         for col_idx, width in enumerate(find_widths, 1):
             ws5.column_dimensions[chr(64 + col_idx)].width = width
 

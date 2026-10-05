@@ -1,8 +1,29 @@
+from django.conf import settings as django_settings
+from django.http import HttpResponse
+
 from rest_framework import viewsets, status, filters, pagination
+from rest_framework import settings as drf_settings
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.negotiation import DefaultContentNegotiation
 from rest_framework.response import Response
+from rest_framework.settings import APISettings
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.permissions import IsAdminUser, AllowAny
+
+
+class NoFormatOverrideNegotiation(DefaultContentNegotiation):
+    """Content negotiation without the ?format= query-param renderer override.
+
+    DRF reserves ?format= for forcing a response renderer (e.g. ?format=json),
+    and 404s when no renderer matches. The /test-runs/export/ action uses
+    'format' as a business parameter (xlsx|csv), so the override is disabled
+    for views using this negotiation class.
+    """
+
+    settings = APISettings(
+        {**django_settings.REST_FRAMEWORK, 'URL_FORMAT_OVERRIDE': None},
+        drf_settings.DEFAULTS,
+    )
 
 from .models import TestPlan, TestStep, TestRun, RunStepResult, Incident, Finding
 from .serializers import (
@@ -177,6 +198,9 @@ class TestRunViewSet(viewsets.ModelViewSet):
     filterset_fields = ['plan', 'status']
     ordering_fields = ['started_at', 'completed_at']
     ordering = ['-started_at']
+    # The /export/ action uses ?format= as a business param (xlsx|csv);
+    # disable DRF's ?format= renderer override for this viewset.
+    content_negotiation_class = NoFormatOverrideNegotiation
 
     @action(detail=True, methods=['get'])
     def progress(self, request, pk=None):
@@ -195,7 +219,8 @@ class TestRunViewSet(viewsets.ModelViewSet):
         passed = results.filter(status='passed').count()
         failed = results.filter(status='failed').count()
         skipped = results.filter(status='skipped').count()
-        executed = passed + failed + skipped
+        blocked = results.filter(status='blocked').count()
+        executed = passed + failed + skipped + blocked
         pending = total_steps - executed
 
         executed_step_ids = set(results.values_list('step_id', flat=True))
@@ -218,6 +243,7 @@ class TestRunViewSet(viewsets.ModelViewSet):
             'passed': passed,
             'failed': failed,
             'skipped': skipped,
+            'blocked': blocked,
             'pending': pending,
             'pending_step_ids': pending_step_ids,
             'sections': sections,
@@ -239,6 +265,210 @@ class TestRunViewSet(viewsets.ModelViewSet):
         run.completed_at = timezone.now()
         run.save(update_fields=['status', 'completed_at'])
         return Response(TestRunSerializer(run).data)
+
+    @action(detail=True, methods=['post'])
+    def reopen(self, request, pk=None):
+        """Reopen a completed/failed/pending run for further execution.
+
+        Sets status back to 'running' and clears completed_at so new step
+        results can be logged. Idempotent: reopening an already-running
+        run is a no-op that returns 200 with the same state.
+        """
+        run = self.get_object()
+        run.status = 'running'
+        run.completed_at = None
+        run.save(update_fields=['status', 'completed_at'])
+        return Response(TestRunSerializer(run).data)
+
+    @action(detail=False, methods=['get'], url_path='export', url_name='export')
+    def export(self, request):
+        """Export one or more runs as a consolidated XLSX or CSV file.
+
+        Query params:
+            runs: comma-separated run ids (required, e.g. runs=128,130)
+            format: 'xlsx' (default) or 'csv'
+            exclude_skipped: 'true'/'1'/'yes' (case-insensitive) omits
+                skipped rows (default false)
+
+        XLSX: one sheet per run ("Run <id>"), one "Findings" sheet across
+        all runs, one "Summary" sheet with per-run counts.
+        CSV: flat rows run_id,step_id,step_name,status,log_message,created_at.
+        """
+        runs_param = (request.query_params.get('runs') or '').strip()
+        format_param = request.query_params.get('format') or 'xlsx'
+        exclude_skipped = (
+            (request.query_params.get('exclude_skipped') or '').lower()
+            in ('true', '1', 'yes')
+        )
+
+        if format_param not in ('xlsx', 'csv'):
+            return Response(
+                {'error': "'format' must be 'xlsx' or 'csv'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not runs_param:
+            return Response(
+                {'error': "'runs' query parameter is required "
+                          "(comma-separated run ids, e.g. runs=1,2,3)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            run_ids = [int(part) for part in runs_param.split(',') if part.strip()]
+            if not run_ids:
+                raise ValueError
+        except ValueError:
+            return Response(
+                {'error': "'runs' must be a comma-separated list of integer run ids."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        runs = list(TestRun.objects.filter(id__in=run_ids).order_by('id'))
+        if not runs:
+            return Response(
+                {'error': f"No runs found for ids: {runs_param}."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if format_param == 'csv':
+            return self._export_csv(runs, runs_param, exclude_skipped)
+        return self._export_xlsx(runs, runs_param, exclude_skipped)
+
+    def _export_results(self, run, exclude_skipped):
+        results = list(
+            run.runstepresults.select_related('step').order_by('step__order_index')
+        )
+        if exclude_skipped:
+            results = [r for r in results if r.status != 'skipped']
+        return results
+
+    def _export_csv(self, runs, runs_param, exclude_skipped):
+        import csv as csv_module
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = (
+            f'attachment; filename="autoqa_export_{runs_param}.csv"'
+        )
+        writer = csv_module.writer(response)
+        writer.writerow(
+            ['run_id', 'step_id', 'step_name', 'status', 'log_message', 'created_at']
+        )
+        for run in runs:
+            for result in self._export_results(run, exclude_skipped):
+                writer.writerow([
+                    run.id,
+                    result.step_id,
+                    result.step.name,
+                    result.status,
+                    result.log_message,
+                    result.created_at.isoformat(),
+                ])
+        return response
+
+    def _export_xlsx(self, runs, runs_param, exclude_skipped):
+        from django.utils.timezone import localtime
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment
+
+        from .views import (
+            _styled_header, _styled_row, _status_font, _title_row,
+            _category_font,
+        )
+
+        wb = Workbook()
+        first_sheet = True
+        for run in runs:
+            ws = wb.active if first_sheet else wb.create_sheet()
+            first_sheet = False
+            ws.title = f"Run {run.id}"
+            _title_row(
+                ws, 1, f"Run #{run.id} — {run.plan.name}",
+                f"Status: {run.get_status_display()}  |  "
+                f"Started: {localtime(run.started_at).strftime('%Y-%m-%d %H:%M')}",
+            )
+            headers = ["Step Name", "Status", "Log Message", "Executed At"]
+            _styled_header(ws, headers)
+            for row_idx, result in enumerate(
+                self._export_results(run, exclude_skipped), 2
+            ):
+                is_alt = (row_idx - 2) % 2 == 0
+                values = [
+                    result.step.name,
+                    result.get_status_display(),
+                    result.log_message or "—",
+                    localtime(result.created_at).strftime("%Y-%m-%d %H:%M"),
+                ]
+                _styled_row(ws, row_idx, values, is_alt)
+                ws.cell(row=row_idx, column=2).font = _status_font(result.status)
+                ws.cell(row=row_idx, column=2).alignment = Alignment(
+                    horizontal="center", vertical="center"
+                )
+            widths = [30, 12, 50, 16]
+            for col_idx, width in enumerate(widths, 1):
+                ws.column_dimensions[chr(64 + col_idx)].width = width
+
+        # Findings sheet across all requested runs
+        findings = Finding.objects.filter(run__in=runs).order_by('run_id', 'id')
+        if findings:
+            ws_f = wb.create_sheet("Findings")
+            headers = [
+                "#", "Run", "Category", "Title", "Description",
+                "Related Steps", "Created",
+            ]
+            _styled_header(ws_f, headers)
+            for row_idx, finding in enumerate(findings, 2):
+                is_alt = (row_idx - 2) % 2 == 0
+                related_steps = ", ".join(
+                    f"#{s.id} {s.name}" for s in finding.step_ids.all()
+                ) or "-"
+                values = [
+                    finding.id,
+                    finding.run_id,
+                    finding.get_category_display(),
+                    finding.title,
+                    finding.description,
+                    related_steps,
+                    localtime(finding.created_at).strftime("%Y-%m-%d %H:%M"),
+                ]
+                _styled_row(ws_f, row_idx, values, is_alt)
+                ws_f.cell(row=row_idx, column=3).font = _category_font(finding.category)
+                ws_f.cell(row=row_idx, column=1).alignment = Alignment(
+                    horizontal="center", vertical="center"
+                )
+            f_widths = [6, 8, 16, 30, 55, 30, 16]
+            for col_idx, width in enumerate(f_widths, 1):
+                ws_f.column_dimensions[chr(64 + col_idx)].width = width
+
+        # Summary sheet: per-run counts
+        ws_s = wb.create_sheet("Summary")
+        headers = [
+            "Run", "Plan", "Status", "Total", "Passed",
+            "Failed", "Skipped", "Blocked", "Pending",
+        ]
+        _styled_header(ws_s, headers)
+        for row_idx, run in enumerate(runs, 2):
+            is_alt = (row_idx - 2) % 2 == 0
+            values = [
+                run.id, run.plan.name, run.get_status_display(),
+                run.total_steps, run.passed_steps, run.failed_steps,
+                run.skipped_steps, run.blocked_steps, run.pending_steps,
+            ]
+            _styled_row(ws_s, row_idx, values, is_alt)
+            ws_s.cell(row=row_idx, column=1).alignment = Alignment(
+                horizontal="center", vertical="center"
+            )
+        s_widths = [8, 30, 12, 10, 10, 10, 10, 10, 10]
+        for col_idx, width in enumerate(s_widths, 1):
+            ws_s.column_dimensions[chr(64 + col_idx)].width = width
+
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="autoqa_export_{runs_param}.xlsx"'
+        )
+        wb.save(response)
+        return response
 
     @action(detail=True, methods=['post'], url_path='skip-steps', url_name='skip-steps')
     def skip_steps(self, request, pk=None):
@@ -409,6 +639,9 @@ class FindingViewSet(viewsets.ModelViewSet):
         run_id = self.request.query_params.get('run')
         if run_id:
             qs = qs.filter(run_id=run_id)
+        project = self.request.query_params.get('project_name')
+        if project:
+            qs = qs.filter(run__plan__project_name=project)
         return qs
 
 

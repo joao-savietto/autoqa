@@ -75,6 +75,27 @@ def _client():
     return httpx.Client(base_url=API_URL, headers=_headers(), timeout=30.0)
 
 
+# Valid RunStepResult statuses (shared by log/update tools).
+VALID_STATUSES = ("passed", "failed", "skipped", "blocked")
+
+
+def _fetch_all_results(client, url, base_params, max_pages=50):
+    """Walk REST pages (page=1,2,...) following 'next' and return the
+    combined list of all result objects. Bounded to max_pages to guard
+    against infinite loops."""
+    items = []
+    for page in range(1, max_pages + 1):
+        params = dict(base_params)
+        params["page"] = page
+        resp = client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        items.extend(data.get("results", []))
+        if data.get("next") is None:
+            break
+    return items
+
+
 # ─── Test Plans ───────────────────────────────────────────────────────────────
 
 
@@ -313,7 +334,8 @@ def bulk_create_test_steps(
             - active (optional, default true): Whether this step is active
 
     Example steps parameter:
-        '[{"name": "Step 1", "action_description": "Do X", "expected_outcome": "X happens"},
+        '[{"name": "Step 1", "action_description": "Do X", "expected_outcome": "X happens",
+           "section": "Authentication"},
           {"name": "Step 2", "action_description": "Do Y", "expected_outcome": "Y happens"}]'
 
     Returns:
@@ -522,6 +544,32 @@ def complete_test_run(run_id: int, status: str = "completed") -> str:
 
 
 @mcp.tool()
+def reopen_test_run(run_id: int) -> str:
+    """Reopen a completed/failed test run so its steps can be executed again.
+
+    Sets the run status back to 'running' and clears completed_at, so new
+    step results can be logged without creating a duplicate run.
+    Idempotent: reopening an already-running run is a no-op.
+
+    Args:
+        run_id: The ID of the test run
+
+    Returns:
+        JSON string with the updated test run data, or an error object
+        if the run does not exist
+    """
+    with _client() as client:
+        try:
+            resp = client.post(f"/api/test-runs/{run_id}/reopen/", json={})
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            if resp.status_code == 404:
+                return json.dumps({"error": f"Run {run_id} not found"})
+            raise
+        return json.dumps(resp.json())
+
+
+@mcp.tool()
 def get_run_progress(run_id: int) -> str:
     """Get execution progress summary for a test run.
 
@@ -541,6 +589,54 @@ def get_run_progress(run_id: int) -> str:
         return json.dumps(resp.json())
 
 
+@mcp.tool()
+def export_run(run_ids: str, format: str = "xlsx", exclude_skipped: bool = False) -> str:
+    """Export one or more test runs as a consolidated XLSX or CSV file.
+
+    Useful for building a single report across multiple runs (e.g.
+    section-scoped runs of the same plan) without leaving the platform.
+
+    XLSX contains one sheet per run ("Run <id>"), a "Findings" sheet
+    across all runs, and a "Summary" sheet with per-run counts.
+    CSV is a flat table: run_id,step_id,step_name,status,log_message,created_at.
+
+    Args:
+        run_ids: Comma-separated run ids, e.g. "128,130"
+        format: 'xlsx' (default) or 'csv'
+        exclude_skipped: If true, omit skipped results from the export
+
+    Returns:
+        JSON string with filename, size_bytes, content_type, and
+        content_base64 (base64-encoded file contents), or an error object
+        if the export fails
+    """
+    import base64
+
+    params = {
+        "runs": run_ids,
+        "format": format,
+        "exclude_skipped": "true" if exclude_skipped else "false",
+    }
+    with _client() as client:
+        try:
+            resp = client.get("/api/test-runs/export/", params=params)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            if resp.status_code in (400, 404):
+                return json.dumps(
+                    {"error": f"Export failed (HTTP {resp.status_code}). Check run ids and format."}
+                )
+            raise
+        content = resp.content
+        filename = f"autoqa_export_{run_ids}.{format if format in ('xlsx', 'csv') else 'xlsx'}"
+        return json.dumps({
+            "filename": filename,
+            "size_bytes": len(content),
+            "content_type": resp.headers.get("content-type", ""),
+            "content_base64": base64.b64encode(content).decode("ascii"),
+        })
+
+
 # ─── Step Results ─────────────────────────────────────────────────────────────
 
 
@@ -556,15 +652,17 @@ def log_step_result(
     Args:
         run_id: The ID of the test run
         step_id: The ID of the test step
-        status: Result status - 'passed', 'failed', or 'skipped'
+        status: Result status - 'passed', 'failed', 'skipped', or 'blocked'
+                 (use 'blocked' when a step could not be executed due to a
+                 missing credential, data, or environment)
         log_message: Execution log or notes
 
     Returns:
         JSON string with the created step result data
     """
-    if status not in ("passed", "failed", "skipped"):
+    if status not in VALID_STATUSES:
         return json.dumps(
-            {"error": f"Invalid status '{status}'. Must be passed, failed, or skipped."}
+            {"error": f"Invalid status '{status}'. Must be one of: {', '.join(VALID_STATUSES)}."}
         )
 
     with _client() as client:
@@ -595,13 +693,14 @@ def bulk_log_step_results(
         run_id: The ID of the test run
         results: JSON string containing a list of result objects. Each result has:
             - step (required): The ID of the test step
-            - status (required): 'passed', 'failed', or 'skipped'
+            - status (required): 'passed', 'failed', 'skipped', or 'blocked'
             - log_message (optional): Execution log or notes
 
     Example results parameter:
         '[{"step": 1, "status": "passed", "log_message": "OK"},
           {"step": 2, "status": "failed", "log_message": "Error found"},
-          {"step": 3, "status": "skipped"}]'
+          {"step": 3, "status": "skipped"},
+          {"step": 4, "status": "blocked", "log_message": "missing API key"}]'
 
     Returns:
         JSON string with count of created results, skipped items, and serialized data
@@ -627,23 +726,124 @@ def bulk_log_step_results(
 
 
 @mcp.tool()
-def get_step_results(run_id: int, status: str = None) -> str:
-    """Get all step results for a test run, optionally filtered by status.
+def update_step_result(
+    run_id: int,
+    step_id: int,
+    status: str = None,
+    log_message: str = None,
+) -> str:
+    """Update an existing step result's status and/or log message.
+
+    Use this to correct a wrong status or amend the log of a step that
+    was already logged in a run. The result must already exist — log it
+    first with log_step_result if it doesn't.
 
     Args:
         run_id: The ID of the test run
-        status: Filter by result status - 'passed', 'failed', or 'skipped'
+        step_id: The ID of the test step
+        status: New result status - 'passed', 'failed', 'skipped', or 'blocked'
+        log_message: New execution log or notes
 
     Returns:
-        JSON string with paginated list of step results
+        JSON string with the patched result data, or an error object if
+        no result exists for the (run, step) pair
     """
-    params = {"run": run_id}
-    if status:
-        params["status"] = status
+    data = {}
+    if status is not None:
+        if status not in VALID_STATUSES:
+            return json.dumps(
+                {"error": f"Invalid status '{status}'. Must be one of: {', '.join(VALID_STATUSES)}."}
+            )
+        data["status"] = status
+    if log_message is not None:
+        data["log_message"] = log_message
+
     with _client() as client:
-        resp = client.get("/api/step-results/", params=params)
+        resp = client.get("/api/step-results/", params={"run": run_id, "step": step_id})
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if not results:
+            return json.dumps(
+                {
+                    "error": (
+                        f"No result for run {run_id} step {step_id} "
+                        "(log it first with log_step_result)"
+                    )
+                }
+            )
+        result_id = results[0]["id"]
+        resp = client.patch(f"/api/step-results/{result_id}/", json=data)
         resp.raise_for_status()
         return json.dumps(resp.json())
+
+
+@mcp.tool()
+def delete_step_result(run_id: int, step_id: int) -> str:
+    """Delete an existing step result from a run.
+
+    The step becomes pending again and can be re-executed and re-logged.
+
+    Args:
+        run_id: The ID of the test run
+        step_id: The ID of the test step
+
+    Returns:
+        JSON string {"deleted": <result_id>}, or an error object if no
+        result exists for the (run, step) pair
+    """
+    with _client() as client:
+        resp = client.get("/api/step-results/", params={"run": run_id, "step": step_id})
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if not results:
+            return json.dumps(
+                {"error": f"No result for run {run_id} step {step_id}"}
+            )
+        result_id = results[0]["id"]
+        resp = client.delete(f"/api/step-results/{result_id}/")
+        resp.raise_for_status()
+        return json.dumps({"deleted": result_id})
+
+
+@mcp.tool()
+def get_step_results(run_id: int, status: str = None, page: int = None, page_size: int = None) -> str:
+    """Get step results for a test run, optionally filtered by status.
+
+    By default returns ALL results for the run as ONE JSON array (REST
+    pagination is walked automatically). Pass page= to get a single REST
+    page in the legacy paginated dict shape instead.
+
+    Args:
+        run_id: The ID of the test run
+        status: Filter by result status - 'passed', 'failed', 'skipped', or 'blocked'
+        page: If set, return only this single REST page as a paginated dict
+              (with results/next/previous) instead of the combined array
+        page_size: (all-mode only) Truncate the combined array to the first
+              N items (clamped to 1..100). Ignored when page is set.
+
+    Returns:
+        JSON string: array of ALL result objects (default) or a single
+        paginated page dict (when page is set)
+    """
+    base_params = {"run": run_id}
+    if status:
+        base_params["status"] = status
+    with _client() as client:
+        if page is not None:
+            params = dict(base_params)
+            params["page"] = page
+            resp = client.get("/api/step-results/", params=params)
+            resp.raise_for_status()
+            return json.dumps(resp.json())
+        items = _fetch_all_results(client, "/api/step-results/", base_params)
+    if page_size is not None:
+        try:
+            n = int(page_size)
+        except (TypeError, ValueError):
+            n = 100
+        n = max(1, min(100, n))
+        items = items[:n]
+    return json.dumps(items)
 
 
 # ─── Incidents ────────────────────────────────────────────────────────────────
@@ -724,16 +924,18 @@ def create_finding(
     title: str,
     description: str,
     category: str = "info",
+    step_ids: list | None = None,
 ) -> str:
     """Register a finding/discovery from a test run.
 
-    Use for interesting observations not tied to a specific test step.
+    Use for interesting observations; link related test steps via step_ids.
 
     Args:
         run_id: The ID of the test run this finding relates to
         title: Short title of the finding
         description: Detailed description of the finding
         category: One of info, suggestion, recommendation, critical
+        step_ids: Optional list of test step IDs this finding relates to
 
     Returns:
         JSON string with the created finding data
@@ -745,34 +947,152 @@ def create_finding(
             }
         )
 
+    data = {
+        "run": run_id,
+        "title": title,
+        "description": description,
+        "category": category,
+    }
+    if step_ids:
+        data["step_ids"] = step_ids
+
     with _client() as client:
-        resp = client.post(
-            "/api/findings/",
-            json={
-                "run": run_id,
-                "title": title,
-                "description": description,
-                "category": category,
-            },
-        )
+        resp = client.post("/api/findings/", json=data)
         resp.raise_for_status()
         return json.dumps(resp.json())
 
 
 @mcp.tool()
-def get_findings(run_id: int) -> str:
-    """List all findings for a test run.
+def get_findings(run_id: int = None, category: str = None, project_name: str = None) -> str:
+    """List findings, optionally filtered by run, category, or project.
+
+    All filters are optional and combined with AND logic. With no filters
+    this returns ALL findings across all runs/projects.
 
     Args:
-        run_id: The ID of the test run
+        run_id: Filter by the ID of the test run
+        category: Filter by category - info, suggestion, recommendation, critical
+        project_name: Filter by the plan's project name (exact match)
 
     Returns:
-        JSON string with list of findings
+        JSON string with an array of finding objects (all pages combined)
+    """
+    params = {}
+    if run_id is not None:
+        params["run"] = run_id
+    if category:
+        params["category"] = category
+    if project_name:
+        params["project_name"] = project_name
+    with _client() as client:
+        items = _fetch_all_results(client, "/api/findings/", params)
+    return json.dumps(items)
+
+
+@mcp.tool()
+def get_project_summary(project_name: str) -> str:
+    """Build a read-only summary report for a project in a single call.
+
+    Aggregates the project's plans, all its runs (with per-run status
+    counts and pass rate), findings by category, and incidents by
+    severity. Read-only: uses only existing GET endpoints.
+
+    Args:
+        project_name: Project name to summarize (exact match on the plan's
+                      project_name, case-insensitive)
+
+    Returns:
+        JSON string:
+        {
+          "project_name": "...",
+          "plans": [{"id": 27, "name": "...", "total_steps": 38}],
+          "runs": [{"run_id": 128, "plan_id": 27, "status": "completed",
+                    "total_steps": 38, "passed": 19, "failed": 0,
+                    "skipped": 19, "blocked": 0, "pending": 0,
+                    "pass_rate": 1.0}],
+          "findings_by_category": {"critical": 1, "info": 2},
+          "incidents_by_severity": {"low": 0, "medium": 0, "high": 1, "critical": 0}
+        }
+        pass_rate is passed / (passed + failed); null when there are no
+        passed+failed steps. An unknown project returns empty plans/runs
+        and empty findings/incidents dicts (not an error).
     """
     with _client() as client:
-        resp = client.get("/api/findings/", params={"run": run_id})
-        resp.raise_for_status()
-        return json.dumps(resp.json())
+        # Plans: REST filter is partial-match, so narrow to exact
+        # (case-insensitive) matches client-side.
+        plan_hits = _fetch_all_results(
+            client, "/api/test-plans/", {"project_name": project_name}
+        )
+        plans = [
+            p for p in plan_hits
+            if (p.get("project_name") or "").lower() == project_name.lower()
+        ]
+
+        # All runs of the project's plans (page-walked per plan).
+        runs = []
+        for plan in plans:
+            runs.extend(
+                _fetch_all_results(client, "/api/test-runs/", {"plan": plan["id"]})
+            )
+
+        # Per-run counts via the progress endpoint.
+        run_summaries = []
+        for run in runs:
+            resp = client.get(f"/api/test-runs/{run['id']}/progress/")
+            resp.raise_for_status()
+            p = resp.json()
+            passed = p.get("passed", 0)
+            failed = p.get("failed", 0)
+            denom = passed + failed
+            run_summaries.append({
+                "run_id": run["id"],
+                "plan_id": run["plan"],
+                "status": run["status"],
+                "total_steps": p.get("total_steps", 0),
+                "passed": passed,
+                "failed": failed,
+                "skipped": p.get("skipped", 0),
+                "blocked": p.get("blocked", 0),
+                "pending": p.get("pending", 0),
+                "pass_rate": (passed / denom) if denom else None,
+            })
+
+        run_ids = {r["run_id"] for r in run_summaries}
+
+        if not run_ids:
+            findings_by_category = {}
+            incidents_by_severity = {}
+        else:
+            # Findings: fetch all, filter client-side to the project's runs.
+            findings_by_category = {}
+            for f in _fetch_all_results(client, "/api/findings/", {}):
+                if f.get("run") in run_ids:
+                    cat = f.get("category")
+                    findings_by_category[cat] = findings_by_category.get(cat, 0) + 1
+
+            # Incidents: fetch all; map to runs via the project's step results.
+            result_ids = set()
+            for run_id in run_ids:
+                for r in _fetch_all_results(
+                    client, "/api/step-results/", {"run": run_id}
+                ):
+                    result_ids.add(r["id"])
+            incidents_by_severity = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+            for inc in _fetch_all_results(client, "/api/incidents/", {}):
+                if inc.get("run_step_result") in result_ids:
+                    sev = inc.get("severity")
+                    incidents_by_severity[sev] = incidents_by_severity.get(sev, 0) + 1
+
+    return json.dumps({
+        "project_name": project_name,
+        "plans": [
+            {"id": p["id"], "name": p["name"], "total_steps": p.get("total_steps", 0)}
+            for p in plans
+        ],
+        "runs": run_summaries,
+        "findings_by_category": findings_by_category,
+        "incidents_by_severity": incidents_by_severity,
+    })
 
 
 if __name__ == "__main__":

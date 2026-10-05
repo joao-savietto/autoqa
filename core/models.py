@@ -117,8 +117,13 @@ class TestRun(models.Model):
         return self.runstepresults.filter(status='skipped').count()
 
     @property
+    def blocked_steps(self):
+        return self.runstepresults.filter(status='blocked').count()
+
+    @property
     def pending_steps(self):
-        return self.total_steps - self.passed_steps - self.failed_steps - self.skipped_steps
+        return (self.total_steps - self.passed_steps - self.failed_steps
+                - self.skipped_steps - self.blocked_steps)
 
 
 class RunStepResult(models.Model):
@@ -128,6 +133,7 @@ class RunStepResult(models.Model):
         ('passed', 'Passed'),
         ('failed', 'Failed'),
         ('skipped', 'Skipped'),
+        ('blocked', 'Blocked'),
     ]
 
     run = models.ForeignKey(TestRun, on_delete=models.CASCADE, related_name='runstepresults')
@@ -193,6 +199,7 @@ class Finding(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField()
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='info')
+    step_ids = models.ManyToManyField(TestStep, blank=True, related_name='findings')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

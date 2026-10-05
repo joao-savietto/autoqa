@@ -185,7 +185,7 @@ class RunStepResultBulkSerializer(serializers.Serializer):
     )
 
     def validate_results(self, value):
-        valid_statuses = {'passed', 'failed', 'skipped'}
+        valid_statuses = {'passed', 'failed', 'skipped', 'blocked'}
         for idx, result in enumerate(value):
             if 'step' not in result:
                 raise serializers.ValidationError(
@@ -262,14 +262,21 @@ class IncidentSerializer(serializers.ModelSerializer):
 
 class FindingSerializer(serializers.ModelSerializer):
     category_display = serializers.CharField(source='get_category_display', read_only=True)
+    step_ids = serializers.PrimaryKeyRelatedField(
+        many=True, required=False, queryset=TestStep.objects.all()
+    )
+    step_names = serializers.SerializerMethodField()
 
     class Meta:
         model = Finding
         fields = [
             'id', 'run', 'title', 'description', 'category',
-            'category_display', 'created_at',
+            'category_display', 'step_ids', 'step_names', 'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+
+    def get_step_names(self, obj):
+        return [f"#{s.id} {s.name}" for s in obj.step_ids.all()]
 
 
 class APIKeySerializer(serializers.Serializer):

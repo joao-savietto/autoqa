@@ -190,10 +190,12 @@
                             <span class="inline-flex items-center justify-center h-9 w-9 rounded-full shrink-0
                                 {% if result.status == 'passed' %}bg-emerald-500/20 text-emerald-400
                                 {% elif result.status == 'failed' %}bg-red-500/20 text-red-400
+                                {% elif result.status == 'blocked' %}bg-amber-500/20 text-amber-400
                                 {% else %}bg-dark-500 text-gray-500{% endif %}">
                                 <i class="fa-solid
                                     {% if result.status == 'passed' %}fa-check
                                     {% elif result.status == 'failed' %}fa-xmark
+                                    {% elif result.status == 'blocked' %}fa-lock
                                     {% else %}fa-minus{% endif %} text-sm"></i>
                             </span>
                             <div>
@@ -204,6 +206,7 @@
                         <span class="badge
                             {% if result.status == 'passed' %}badge-green
                             {% elif result.status == 'failed' %}badge-red
+                            {% elif result.status == 'blocked' %}badge-yellow
                             {% else %}badge-gray{% endif %}">
                             {{ result.get_status_display }}
                         </span>

@@ -47,3 +47,7 @@ entities.json
 # internal agent notes (moved to ~/dev_notes)
 AGENTS.md
 MEMORY.md
+
+# pi-dev working artifacts (never versioned)
+implementation_plan.md
+final_report.md
